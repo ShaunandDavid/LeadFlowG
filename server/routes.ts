@@ -229,6 +229,262 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // CSV Import with deduplication
+  app.post("/api/leads/import", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { csv, listId } = req.body;
+      const tenantId = req.user?.tenantId;
+      
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      if (!csv || typeof csv !== 'string') {
+        return res.status(400).json({ error: "CSV data required" });
+      }
+
+      // Parse CSV (expecting: email, firstName, lastName, title, company, domain, phone, industry, revenue, employeeCount)
+      const Papa = await import('papaparse');
+      const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
+      
+      if (parsed.errors.length > 0) {
+        return res.status(400).json({ error: "CSV parsing error", details: parsed.errors });
+      }
+
+      const rows = parsed.data as any[];
+      
+      // Get existing leads for deduplication
+      const existingLeadsSnapshot = await adminDb
+        .collection("tenants")
+        .doc(tenantId)
+        .collection("leads")
+        .get();
+
+      const existingEmails = new Set<string>();
+      const existingDomainNames = new Set<string>();
+      
+      existingLeadsSnapshot.docs.forEach(doc => {
+        const lead = doc.data();
+        if (lead.contact?.email) {
+          existingEmails.add(lead.contact.email.toLowerCase());
+        }
+        if (lead.company?.domain && lead.person?.lastName) {
+          existingDomainNames.add(`${lead.company.domain.toLowerCase()}:${lead.person.lastName.toLowerCase()}`);
+        }
+      });
+
+      const imported: any[] = [];
+      const skipped: any[] = [];
+      const now = new Date().toISOString();
+
+      for (const row of rows) {
+        const email = row.email?.trim().toLowerCase();
+        if (!email) {
+          skipped.push({ row, reason: "Missing email" });
+          continue;
+        }
+
+        // Dedup by email
+        if (existingEmails.has(email)) {
+          skipped.push({ row, reason: "Duplicate email" });
+          continue;
+        }
+
+        // Dedup by domain + name
+        const domain = row.domain?.trim().toLowerCase() || row.company?.toLowerCase();
+        const lastName = row.lastName?.trim().toLowerCase();
+        if (domain && lastName) {
+          const key = `${domain}:${lastName}`;
+          if (existingDomainNames.has(key)) {
+            skipped.push({ row, reason: "Duplicate domain+name" });
+            continue;
+          }
+          existingDomainNames.add(key);
+        }
+
+        existingEmails.add(email);
+
+        // Create lead
+        const leadRef = adminDb
+          .collection("tenants")
+          .doc(tenantId)
+          .collection("leads")
+          .doc();
+
+        const leadData = {
+          id: leadRef.id,
+          tenantId,
+          listId: listId || null,
+          person: {
+            firstName: row.firstName?.trim() || null,
+            lastName: row.lastName?.trim() || null,
+            title: row.title?.trim() || null,
+          },
+          company: {
+            name: row.company?.trim() || null,
+            domain: domain || null,
+            revenue: row.revenue ? parseFloat(row.revenue) : null,
+            employeeCount: row.employeeCount ? parseInt(row.employeeCount) : null,
+            industry: row.industry?.trim() || null,
+          },
+          contact: {
+            email,
+            phone: row.phone?.trim() || null,
+          },
+          verify: {
+            status: "pending",
+          },
+          status: "new",
+          provenance: {
+            source: "csv_import",
+            importedAt: now,
+          },
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        await leadRef.set(leadData);
+        imported.push(leadData);
+      }
+
+      // Update list count if applicable
+      if (listId) {
+        const listRef = adminDb.collection("tenants").doc(tenantId).collection("lists").doc(listId);
+        const listDoc = await listRef.get();
+        if (listDoc.exists) {
+          await listRef.update({
+            leadsCount: (listDoc.data()?.leadsCount || 0) + imported.length,
+          });
+        }
+      }
+
+      res.json({
+        imported: imported.length,
+        skipped: skipped.length,
+        total: rows.length,
+        details: { imported, skipped },
+      });
+    } catch (error) {
+      console.error("CSV import error:", error);
+      res.status(500).json({ error: "Failed to import leads" });
+    }
+  });
+
+  // Bulk operations
+  app.post("/api/leads/bulk", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { operation, leadIds, data } = req.body;
+      const tenantId = req.user?.tenantId;
+      
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      if (!operation || !Array.isArray(leadIds) || leadIds.length === 0) {
+        return res.status(400).json({ error: "Operation and leadIds required" });
+      }
+
+      const batch = adminDb.batch();
+      const now = new Date().toISOString();
+
+      for (const leadId of leadIds) {
+        const leadRef = adminDb.collection("tenants").doc(tenantId).collection("leads").doc(leadId);
+        
+        switch (operation) {
+          case "tag":
+            if (!data?.tags) {
+              return res.status(400).json({ error: "Tags data required" });
+            }
+            batch.update(leadRef, {
+              tags: data.tags,
+              updatedAt: now,
+            });
+            break;
+          
+          case "delete":
+            batch.delete(leadRef);
+            break;
+          
+          case "suppress":
+            batch.update(leadRef, {
+              suppression: {
+                global: true,
+                reason: data?.reason || "Manual suppression",
+              },
+              updatedAt: now,
+            });
+            break;
+          
+          case "updateStatus":
+            if (!data?.status) {
+              return res.status(400).json({ error: "Status data required" });
+            }
+            batch.update(leadRef, {
+              status: data.status,
+              updatedAt: now,
+            });
+            break;
+          
+          default:
+            return res.status(400).json({ error: "Invalid operation" });
+        }
+      }
+
+      await batch.commit();
+      
+      res.json({ success: true, affected: leadIds.length });
+    } catch (error) {
+      console.error("Bulk operation error:", error);
+      res.status(500).json({ error: "Failed to perform bulk operation" });
+    }
+  });
+
+  // Export leads as CSV
+  app.get("/api/leads/export", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const leadsSnapshot = await adminDb
+        .collection("tenants")
+        .doc(tenantId)
+        .collection("leads")
+        .get();
+
+      const rows = leadsSnapshot.docs.map(doc => {
+        const lead = doc.data();
+        return {
+          email: lead.contact?.email || '',
+          firstName: lead.person?.firstName || '',
+          lastName: lead.person?.lastName || '',
+          title: lead.person?.title || '',
+          company: lead.company?.name || '',
+          domain: lead.company?.domain || '',
+          phone: lead.contact?.phone || '',
+          industry: lead.company?.industry || '',
+          revenue: lead.company?.revenue || '',
+          employeeCount: lead.company?.employeeCount || '',
+          status: lead.status || 'new',
+          score: lead.score?.grade || '',
+          verifyStatus: lead.verify?.status || 'pending',
+        };
+      });
+
+      const Papa = await import('papaparse');
+      const csv = Papa.unparse(rows);
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=leads_export.csv');
+      res.send(csv);
+    } catch (error) {
+      console.error("Export error:", error);
+      res.status(500).json({ error: "Failed to export leads" });
+    }
+  });
+
   app.post("/api/leads/:id/score", authenticateToken, async (req: AuthRequest, res) => {
     try {
       if (!isOpenAIAvailable()) {
