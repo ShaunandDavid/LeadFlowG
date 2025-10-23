@@ -2,8 +2,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { adminAuth, adminDb } from "./lib/firebase-admin";
 import { authenticateToken, requireRole, AuthRequest } from "./middleware/auth";
-import { scoreLead, classifyReply } from "./services/openai";
-import { stripe, createCheckoutSession, createBillingPortalSession, PLAN_CONFIGS } from "./services/stripe";
+import { scoreLead, classifyReply, isOpenAIAvailable } from "./services/openai";
+import { stripe, createCheckoutSession, createBillingPortalSession, isStripeAvailable, PLAN_CONFIGS } from "./services/stripe";
 import { provisionTenant, getTenantForUser } from "./services/tenant-provisioning";
 import { insertLeadSchema, insertSequenceSchema, insertTemplateSchema, insertListSchema } from "@shared/schema";
 
@@ -24,9 +24,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const tenantInfo = await getTenantForUser(decodedToken.uid);
       
+      if (tenantInfo) {
+        // User already has tenant - generate fresh custom token with claims
+        const customToken = await adminAuth.createCustomToken(decodedToken.uid, {
+          tenantId: tenantInfo.tenantId,
+          role: tenantInfo.role,
+        });
+        
+        return res.json({
+          needsOnboarding: false,
+          tenantId: tenantInfo.tenantId,
+          customToken,
+        });
+      }
+      
       res.json({
-        needsOnboarding: !tenantInfo,
-        tenantId: tenantInfo?.tenantId,
+        needsOnboarding: true,
+        tenantId: null,
       });
     } catch (error) {
       console.error("Check onboarding error:", error);
@@ -49,7 +63,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Check if already provisioned
       const existing = await getTenantForUser(decodedToken.uid);
       if (existing) {
-        return res.json({ tenantId: existing.tenantId, alreadyProvisioned: true });
+        // Generate new token with fresh claims for consistency
+        const customToken = await adminAuth.createCustomToken(decodedToken.uid, {
+          tenantId: existing.tenantId,
+          role: existing.role,
+        });
+        return res.json({ 
+          tenantId: existing.tenantId, 
+          alreadyProvisioned: true,
+          customToken,
+        });
       }
       
       const { plan } = req.body;
@@ -62,7 +85,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         plan: plan || 'starter',
       });
 
-      res.json(result);
+      // Generate a new custom token with the fresh claims
+      // This ensures the client can immediately sign in with the new claims
+      const customToken = await adminAuth.createCustomToken(decodedToken.uid, {
+        tenantId: result.tenantId,
+        role: 'owner',
+      });
+
+      res.json({ ...result, customToken });
     } catch (error) {
       console.error("Provision tenant error:", error);
       res.status(500).json({ error: "Failed to provision tenant" });
@@ -201,6 +231,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/leads/:id/score", authenticateToken, async (req: AuthRequest, res) => {
     try {
+      if (!isOpenAIAvailable()) {
+        return res.status(503).json({ 
+          error: "AI scoring is not available - OpenAI API key not configured" 
+        });
+      }
+
       const tenantId = req.user?.tenantId;
       const { id } = req.params;
       
@@ -344,6 +380,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { plan } = req.body;
       
+      if (!isStripeAvailable()) {
+        return res.status(503).json({ 
+          error: "Billing is not available - Stripe not configured" 
+        });
+      }
+
       if (!['starter', 'pro', 'agency'].includes(plan)) {
         return res.status(400).json({ error: "Invalid plan" });
       }
@@ -364,6 +406,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/stripe/create-portal", authenticateToken, async (req: AuthRequest, res) => {
     try {
+      if (!isStripeAvailable()) {
+        return res.status(503).json({ 
+          error: "Billing portal is not available - Stripe not configured" 
+        });
+      }
       const tenantId = req.user?.tenantId;
       if (!tenantId) {
         return res.status(400).json({ error: "No tenant ID" });

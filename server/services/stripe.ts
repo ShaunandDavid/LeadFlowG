@@ -3,17 +3,31 @@ import Stripe from "stripe";
 
 // Deferred initialization to avoid crashing server when secret is missing
 let stripe: Stripe | null = null;
+let stripeAvailable: boolean | null = null;
 
 function getStripe(): Stripe {
+  if (stripeAvailable === false) {
+    throw new Error('Stripe is not configured - STRIPE_SECRET_KEY environment variable is missing');
+  }
+  
   if (!stripe) {
     if (!process.env.STRIPE_SECRET_KEY) {
+      stripeAvailable = false;
       throw new Error('Stripe operations require STRIPE_SECRET_KEY environment variable');
     }
     stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
       apiVersion: "2023-10-16",
     });
+    stripeAvailable = true;
   }
   return stripe;
+}
+
+export function isStripeAvailable(): boolean {
+  if (stripeAvailable === null) {
+    stripeAvailable = !!process.env.STRIPE_SECRET_KEY;
+  }
+  return stripeAvailable;
 }
 
 export { getStripe as stripe };

@@ -4,16 +4,30 @@ import OpenAI from "openai";
 
 // Deferred initialization to avoid crashing server when API key is missing
 let openai: OpenAI | null = null;
+let openaiAvailable: boolean | null = null;
 
 function getOpenAI(): OpenAI {
+  if (openaiAvailable === false) {
+    throw new Error('OpenAI is not configured - OPENAI_API_KEY environment variable is missing');
+  }
+  
   if (!openai) {
     if (!process.env.OPENAI_API_KEY) {
+      openaiAvailable = false;
       throw new Error('OpenAI operations require OPENAI_API_KEY environment variable');
     }
     // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
     openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    openaiAvailable = true;
   }
   return openai;
+}
+
+export function isOpenAIAvailable(): boolean {
+  if (openaiAvailable === null) {
+    openaiAvailable = !!process.env.OPENAI_API_KEY;
+  }
+  return openaiAvailable;
 }
 
 export interface LeadScoreResult {

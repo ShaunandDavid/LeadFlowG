@@ -45,10 +45,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             });
             
             if (checkResponse.ok) {
-              const { needsOnboarding } = await checkResponse.json();
-              if (needsOnboarding) {
+              const data = await checkResponse.json();
+              if (data.needsOnboarding) {
                 // Redirect to onboarding
                 window.location.href = '/onboarding';
+              } else if (data.customToken) {
+                // User has tenant but token is stale - refresh with custom token
+                const { signInWithCustomToken } = await import('firebase/auth');
+                await signInWithCustomToken(auth, data.customToken);
+                // Auth state will update automatically
               }
             }
           }

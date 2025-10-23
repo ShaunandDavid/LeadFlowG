@@ -70,9 +70,15 @@ export default function Onboarding() {
         });
 
         if (response.ok) {
-          // Force token refresh to get new custom claims
-          await user.getIdToken(true);
-          // Redirect to dashboard
+          const data = await response.json();
+          
+          // Sign in with the custom token to get fresh ID token with claims
+          if (data.customToken) {
+            const { signInWithCustomToken } = await import('firebase/auth');
+            await signInWithCustomToken(auth, data.customToken);
+          }
+          
+          // Redirect to dashboard - auth context will now have proper claims
           setLocation("/dashboard");
         } else {
           console.error("Failed to provision tenant");
