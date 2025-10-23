@@ -1,0 +1,155 @@
+this is a strong V1—but a few must-haves are missing if you want this to be truly production-grade, safe, and repeatable for clients. Here’s the no-BS gap list, in priority order.
+
+🔴 Blockers (ship with V1 or you’ll regret it)
+
+Deliverability & Safety Guardrails
+
+Throttling & Warm-up ramps per sender (Cloud Tasks + daily caps).
+
+Bounce/complaint handling (Gmail/Twilio status webhooks → auto-pause sequence/tenant at >3% bounce).
+
+Unsubscribe compliance (global + list-level; List-Unsubscribe header).
+
+Quiet hours / time-windows (respect local time; no sends at 2am).
+
+Email Verification
+
+NeverBounce/ZeroBounce before first send (drop risky/disposable).
+
+Metrics gate: block sending if verification pass rate is too low.
+
+Reply Intelligence
+
+Gmail watch webhook + classifier: positive / neutral / OOO / “not interested” / unsubscribe / booked.
+
+Auto-transition lead status; trigger booking flow on positive.
+
+Queues & Idempotency
+
+Cloud Tasks for every send; retries with backoff; dedupe keys per message (prevents double-sends on retries).
+
+Dead-letter queue + requeue button in admin.
+
+Usage Metering → Stripe
+
+Count verifications and emails sent per tenant; write metered usage to Stripe (nightly job).
+
+Hard/soft limit enforcement tied to plan.
+
+Security of Secrets
+
+Store OAuth refresh tokens + vendor creds in GCP Secret Manager/KMS, not Firestore; proxy all vendor calls server-side.
+
+Global Suppression
+
+Per-tenant and global suppression lists (do-not-contact emails/domains); dedupe across lists and re-imports.
+
+🟠 Should-Haves (first month)
+
+Deliverability Setup Assistant
+
+SPF/DKIM/DMARC wizard for custom sending domains (for Pro/Agency).
+
+Domain verification status checks + in-app guidance.
+
+Click Tracking & UTMs
+
+Link wrapper domain (per tenant), click metrics, UTM auto-tagging by sequence and step.
+
+Scoring 2.0
+
+Hybrid: rules baseline + GPT tiebreaker + reason string saved to lead.
+
+Penalize signs of spam traps / mismatched ICP.
+
+Scheduling & Booking
+
+Round-robin routing between reps; buffer times; reschedule links; Google Meet insertion.
+
+“Reply-to-book” parser that proposes times right in email threads.
+
+Industry Packs (Seed Content)
+
+Prebuilt filters + 3 sequence templates per industry (roofing, dental, etc.) with safe personalization variables.
+
+Analytics That Matter
+
+Funnel (import → verified → A/B/C → contacted → replied → booked → won).
+
+Subject line leaderboard, send-time heatmap, template performance.
+
+Admin Ops Console
+
+Impersonate user; pause tenant; requeue failed tasks; view vendor quota/health; per-tenant rate-limit knobs.
+
+Observability
+
+Sentry (errors), PostHog (feature usage), BigQuery (event stream) + a daily “health report” job.
+
+🟡 Nice-to-Haves (quarter)
+
+A/B Testing
+
+Subject/body variants per step; auto-promote winners.
+
+Template Versioning & Approval
+
+Lockable versions; change history; revert.
+
+CRM Write-backs
+
+Pipedrive/HubSpot/Notion toggles (queued sync, rate-limited, retryable).
+
+SMS Channel Guardrails
+
+Consent capture, STOP/HELP handling, per-country CTIA/CASL toggles.
+
+White-Label
+
+Custom domain, logo/colors, remove “Powered by” on Agency; email theming.
+
+🔧 Minimal schema bumps you’ll need
+
+tenants.usage: { emailsMonth, verificationsMonth, lastResetAt }
+
+tenants.limits: { emailsPerDay, verificationsPerMonth, seats, rampStage }
+
+leads.verify: { status, score }
+
+leads.suppression: { global:boolean, reason?:string }
+
+events: append type (send_ok, bounce, complaint, reply_positive, unsubscribe, click, open) + sequenceId, step, messageId
+
+sequences.steps[*]: add quietHours, sendWindow, variantId?
+
+tokens.google: add expiry, scopes, email
+
+settings.domain: { status: 'pending'|'verified', dkimKeys[], dmarc?, spf? }
+
+🧠 Product polish that pays off
+
+Onboarding wizard (connect Google → pick plan → (optional) verify domain → import CSV → preview 5 personalized samples → start at 25/day).
+
+Guardrail banners (e.g., “Bounce rate 3.4% — sending paused; run verification”).
+
+One-click “Clean list” button before first send.
+
+Rate cards in-app when hitting limits; Stripe portal link right there.
+
+🛡️ Compliance basics to add
+
+Per-email physical address footer + preference links.
+
+Automatic List-Unsubscribe header.
+
+Data retention policy toggles (auto-delete bounces after N days).
+
+“Export my data” and “Delete my data” (tenant-scoped).
+
+✂️ What you can safely defer (but design for)
+
+Dedicated IP pools (later; Resend shared pools + good hygiene first).
+
+Multi-region active-active (start single region; keep vendor abstractions clean).
+
+Make.com connector bus (only when a client needs an odd integration).
