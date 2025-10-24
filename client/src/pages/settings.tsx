@@ -6,7 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { StatusBadge } from "@/components/status-badge";
 import { Settings as SettingsIcon, CreditCard, Palette, Users, Globe } from "lucide-react";
-import { SiGmail, SiStripe, SiTwilio } from "react-icons/si";
+import { SiStripe, SiTwilio } from "react-icons/si";
+import { GmailIntegration } from "@/components/gmail-integration";
 
 export default function Settings() {
   return (
@@ -45,42 +46,7 @@ export default function Settings() {
         <TabsContent value="integrations" className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Gmail Integration */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white border">
-                      <SiGmail className="h-5 w-5 text-red-600" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">Gmail</CardTitle>
-                      <CardDescription className="text-xs">Email sending & calendar</CardDescription>
-                    </div>
-                  </div>
-                  <StatusBadge status="active" />
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Connected as</span>
-                    <span className="font-medium">user@company.com</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Daily send limit</span>
-                    <span className="font-medium">100 emails</span>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" className="flex-1" data-testid="button-gmail-reconnect">
-                    Reconnect
-                  </Button>
-                  <Button variant="outline" size="sm" className="flex-1" data-testid="button-gmail-disconnect">
-                    Disconnect
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+            <GmailIntegration />
 
             {/* Stripe Integration */}
             <Card>

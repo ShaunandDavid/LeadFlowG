@@ -75,7 +75,12 @@ app.use((req, res, next) => {
     port,
     host: "0.0.0.0",
     reusePort: true,
-  }, () => {
+  }, async () => {
     log(`serving on port ${port}`);
+    
+    // Start email worker (processes queue every 60 seconds)
+    const { startEmailWorker } = await import('./services/email-worker');
+    startEmailWorker(60000);
+    log('Email worker started');
   });
 })();

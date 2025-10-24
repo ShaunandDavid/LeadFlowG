@@ -1246,6 +1246,147 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== EMAIL QUEUE PROCESSING ====================
+
+  app.post("/api/queue/process", authenticateToken, requireRole(['owner', 'admin']), async (req: AuthRequest, res) => {
+    try {
+      const { processEmailQueue } = await import('./services/email-worker');
+      
+      // Trigger immediate processing (don't await - run in background)
+      processEmailQueue().catch(console.error);
+      
+      res.json({ success: true, message: 'Email queue processing triggered' });
+    } catch (error) {
+      console.error("Process queue error:", error);
+      res.status(500).json({ error: "Failed to process queue" });
+    }
+  });
+
+  // ==================== GOOGLE OAUTH ROUTES ====================
+
+  app.get("/api/oauth/google/start", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { getAuthUrl } = await import('./services/google-oauth');
+      const authUrl = getAuthUrl(tenantId);
+
+      res.json({ authUrl });
+    } catch (error) {
+      console.error("Google OAuth start error:", error);
+      res.status(500).json({ error: "Failed to generate OAuth URL" });
+    }
+  });
+
+  app.get("/api/oauth/google/callback", async (req, res) => {
+    try {
+      const { code, state } = req.query;
+
+      if (!code || !state || typeof code !== 'string' || typeof state !== 'string') {
+        return res.status(400).send("Missing code or state parameter");
+      }
+
+      const { handleOAuthCallback } = await import('./services/google-oauth');
+      const result = await handleOAuthCallback({ code, state });
+
+      // Return success page
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Gmail Connected</title>
+            <style>
+              body { font-family: system-ui; max-width: 600px; margin: 100px auto; text-align: center; }
+              h1 { color: #10b981; }
+              .email { background: #f3f4f6; padding: 8px 16px; border-radius: 6px; display: inline-block; }
+            </style>
+          </head>
+          <body>
+            <h1>✓ Gmail Connected Successfully</h1>
+            <p>Your Gmail account has been connected:</p>
+            <div class="email">${result.email}</div>
+            <p style="margin-top: 32px;">You can close this window and return to the app.</p>
+            <script>
+              // Auto-close after 3 seconds
+              setTimeout(() => {
+                window.close();
+              }, 3000);
+            </script>
+          </body>
+        </html>
+      `);
+    } catch (error) {
+      console.error("Google OAuth callback error:", error);
+      res.status(500).send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Connection Failed</title>
+            <style>
+              body { font-family: system-ui; max-width: 600px; margin: 100px auto; text-align: center; }
+              h1 { color: #ef4444; }
+            </style>
+          </head>
+          <body>
+            <h1>✗ Connection Failed</h1>
+            <p>Failed to connect Gmail. Please try again.</p>
+            <p style="color: #6b7280; font-size: 14px;">${error instanceof Error ? error.message : 'Unknown error'}</p>
+          </body>
+        </html>
+      `);
+    }
+  });
+
+  app.get("/api/oauth/google/status", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { isGmailConnected } = await import('./services/google-oauth');
+      const connected = await isGmailConnected(tenantId);
+
+      if (connected) {
+        // Get email address
+        const tokenDoc = await adminDb
+          .collection('tenants')
+          .doc(tenantId)
+          .collection('tokens')
+          .doc('google')
+          .get();
+        
+        const tokenData = tokenDoc.data();
+        res.json({ connected: true, email: tokenData?.email || null });
+      } else {
+        res.json({ connected: false, email: null });
+      }
+    } catch (error) {
+      console.error("Google OAuth status error:", error);
+      res.status(500).json({ error: "Failed to check connection status" });
+    }
+  });
+
+  app.delete("/api/oauth/google/disconnect", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { disconnectGmail } = await import('./services/google-oauth');
+      await disconnectGmail(tenantId);
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Google OAuth disconnect error:", error);
+      res.status(500).json({ error: "Failed to disconnect Gmail" });
+    }
+  });
+
   const httpServer = createServer(app);
 
   return httpServer;
