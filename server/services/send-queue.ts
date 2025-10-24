@@ -242,7 +242,7 @@ export async function markAsFailed(tenantId: string, emailId: string, error: str
 }
 
 export async function resetDailyQuotas(): Promise<void> {
-  // This should be called daily (e.g., via cron job)
+  // This should be called daily (e.g., via cron job at midnight)
   // Resets emailsSentToday for all tenants
   
   const tenantsSnapshot = await adminDb.collection("tenants").get();
@@ -255,6 +255,36 @@ export async function resetDailyQuotas(): Promise<void> {
   });
   
   await batch.commit();
+}
+
+export async function processAllPendingSteps(): Promise<void> {
+  // This should be called periodically (e.g., every 5 minutes) via cron
+  // Processes pending waits and schedules next steps for all active runs
+  
+  const { scheduleNextSteps } = await import('./sequence-engine');
+  
+  const tenantsSnapshot = await adminDb.collection("tenants").get();
+  
+  for (const tenantDoc of tenantsSnapshot.docs) {
+    const tenantId = tenantDoc.id;
+    
+    // Get all active runs for this tenant
+    const runsSnapshot = await adminDb
+      .collection("tenants")
+      .doc(tenantId)
+      .collection("runs")
+      .where("status", "==", "active")
+      .get();
+    
+    // Schedule next steps for each run
+    for (const runDoc of runsSnapshot.docs) {
+      try {
+        await scheduleNextSteps(tenantId, runDoc.id);
+      } catch (error) {
+        console.error(`Failed to schedule steps for run ${runDoc.id}:`, error);
+      }
+    }
+  }
 }
 
 export async function advanceWarmupStage(tenantId: string): Promise<void> {

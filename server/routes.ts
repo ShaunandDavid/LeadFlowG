@@ -7,6 +7,7 @@ import { stripe, createCheckoutSession, createBillingPortalSession, isStripeAvai
 import { provisionTenant, getTenantForUser } from "./services/tenant-provisioning";
 import { verifyEmail, verifyEmailBatch, isNeverBounceAvailable } from "./services/neverbounce";
 import { getThrottleStatus, enqueueEmail, getNextBatch, advanceWarmupStage } from "./services/send-queue";
+import { startSequenceRun, pauseRun, resumeRun, markLeadAsReplied, scheduleNextSteps } from "./services/sequence-engine";
 import { insertLeadSchema, insertSequenceSchema, insertTemplateSchema, insertListSchema } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -888,6 +889,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Advance warmup error:", error);
       res.status(500).json({ error: "Failed to advance warmup stage" });
+    }
+  });
+
+  // Cron job endpoint for processing pending sequence steps
+  // Should be called periodically (e.g., every 5 minutes) by external scheduler
+  app.post("/api/queue/process-pending-steps", async (req: AuthRequest, res) => {
+    try {
+      const { processAllPendingSteps } = await import('./services/send-queue');
+      await processAllPendingSteps();
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Process pending steps error:", error);
+      res.status(500).json({ error: "Failed to process pending steps" });
+    }
+  });
+
+  // ==================== SEQUENCE RUN ROUTES ====================
+  
+  app.post("/api/runs", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { sequenceId, leadIds } = req.body;
+      
+      if (!sequenceId || !Array.isArray(leadIds) || leadIds.length === 0) {
+        return res.status(400).json({ error: "Sequence ID and lead IDs required" });
+      }
+
+      const run = await startSequenceRun({ tenantId, sequenceId, leadIds });
+      res.status(201).json(run);
+    } catch (error) {
+      console.error("Start sequence run error:", error);
+      res.status(500).json({ error: "Failed to start sequence run" });
+    }
+  });
+
+  app.post("/api/runs/:id/pause", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      const { id } = req.params;
+      
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      await pauseRun(tenantId, id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Pause run error:", error);
+      res.status(500).json({ error: "Failed to pause run" });
+    }
+  });
+
+  app.post("/api/runs/:id/resume", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      const { id } = req.params;
+      
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      await resumeRun(tenantId, id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Resume run error:", error);
+      res.status(500).json({ error: "Failed to resume run" });
+    }
+  });
+
+  app.post("/api/runs/:id/lead-replied", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      const { id } = req.params;
+      const { leadId, replyCategory } = req.body;
+      
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      await markLeadAsReplied({ tenantId, leadId, runId: id, replyCategory });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Mark lead replied error:", error);
+      res.status(500).json({ error: "Failed to mark lead as replied" });
     }
   });
 
