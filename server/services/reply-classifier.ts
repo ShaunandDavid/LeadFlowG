@@ -248,6 +248,21 @@ export async function processClassifiedReply(params: {
 
   await leadRef.update(updates);
 
+  // Record analytics event for reply
+  const { recordEvent } = await import('../lib/events');
+  await recordEvent({
+    tenantId,
+    leadId,
+    type: classification.category === 'booked' ? 'booked' : 'reply',
+    messageId,
+    timestamp: receivedAt,
+    metadata: {
+      category: classification.category,
+      confidence: classification.confidence,
+      reason: classification.reason,
+    },
+  });
+
   // Log the reply event
   await adminDb
     .collection('tenants')

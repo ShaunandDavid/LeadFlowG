@@ -1133,6 +1133,211 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== ANALYTICS TRACKING ROUTES ====================
+
+  // Open tracking pixel
+  app.get("/api/track/open.png", async (req, res) => {
+    try {
+      const { id } = req.query;
+      
+      if (!id || typeof id !== 'string') {
+        // Return blank pixel even if invalid to avoid broken images
+        const pixel = Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+          'base64'
+        );
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.send(pixel);
+      }
+
+      const { verifyTrackingToken } = await import('../lib/track');
+      const { recordEvent } = await import('../lib/events');
+      
+      // Verify token
+      const payload = verifyTrackingToken(id);
+      
+      // Record open event
+      await recordEvent({
+        tenantId: payload.tenantId,
+        leadId: payload.leadId,
+        sequenceId: payload.sequenceId,
+        stepId: payload.stepId,
+        messageId: payload.messageId,
+        templateId: payload.templateId,
+        type: 'open',
+        userAgent: req.headers['user-agent'],
+        ipAddress: req.ip,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Return 1x1 transparent PNG
+      const pixel = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+        'base64'
+      );
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.send(pixel);
+    } catch (error) {
+      // Return blank pixel even on error
+      const pixel = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+        'base64'
+      );
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.send(pixel);
+    }
+  });
+
+  // Click tracking redirect
+  app.get("/api/track/click/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { u } = req.query;
+
+      if (!id || !u || typeof u !== 'string') {
+        return res.status(400).send('Invalid tracking link');
+      }
+
+      const { verifyTrackingToken } = await import('../lib/track');
+      const { recordEvent } = await import('../lib/events');
+      
+      // Verify token
+      const payload = verifyTrackingToken(id);
+      
+      // Record click event
+      await recordEvent({
+        tenantId: payload.tenantId,
+        leadId: payload.leadId,
+        sequenceId: payload.sequenceId,
+        stepId: payload.stepId,
+        messageId: payload.messageId,
+        templateId: payload.templateId,
+        type: 'click',
+        url: decodeURIComponent(u),
+        userAgent: req.headers['user-agent'],
+        ipAddress: req.ip,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Redirect to original URL
+      res.redirect(302, decodeURIComponent(u));
+    } catch (error) {
+      console.error('Click tracking error:', error);
+      // Redirect anyway to avoid breaking the user experience
+      if (req.query.u && typeof req.query.u === 'string') {
+        res.redirect(302, decodeURIComponent(req.query.u));
+      } else {
+        res.status(400).send('Invalid tracking link');
+      }
+    }
+  });
+
+  // Get analytics data
+  app.get("/api/analytics", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { startDate, endDate } = req.query;
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: "Start date and end date required" });
+      }
+
+      const { getTenantAnalytics } = await import('../lib/events');
+      const analytics = await getTenantAnalytics({
+        tenantId,
+        startDate: startDate as string,
+        endDate: endDate as string,
+      });
+
+      res.json(analytics);
+    } catch (error) {
+      console.error("Get analytics error:", error);
+      res.status(500).json({ error: "Failed to get analytics" });
+    }
+  });
+
+  // Get sequence analytics
+  app.get("/api/analytics/sequences/:sequenceId", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { sequenceId } = req.params;
+      const { startDate, endDate } = req.query;
+      
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: "Start date and end date required" });
+      }
+
+      const { getSequenceAnalytics } = await import('../lib/events');
+      const analytics = await getSequenceAnalytics({
+        sequenceId,
+        startDate: startDate as string,
+        endDate: endDate as string,
+      });
+
+      res.json(analytics);
+    } catch (error) {
+      console.error("Get sequence analytics error:", error);
+      res.status(500).json({ error: "Failed to get sequence analytics" });
+    }
+  });
+
+  // Export analytics events as CSV
+  app.get("/api/analytics/export", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { startDate, endDate } = req.query;
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: "Start date and end date required" });
+      }
+
+      const { getAnalyticsEvents } = await import('../lib/events');
+      const events = await getAnalyticsEvents({
+        tenantId,
+        startDate: startDate as string,
+        endDate: endDate as string,
+        limit: 10000,
+      });
+
+      // Convert to CSV
+      const headers = ['Timestamp', 'Type', 'Sequence', 'Step', 'Lead', 'Message ID', 'URL', 'User Agent'];
+      const rows = events.map(e => [
+        e.timestamp,
+        e.type,
+        e.sequenceId || '',
+        e.stepId || '',
+        e.leadId || '',
+        e.messageId || '',
+        e.url || '',
+        e.userAgent || '',
+      ]);
+
+      const csv = [headers, ...rows]
+        .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+        .join('\n');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="analytics-${startDate}-${endDate}.csv"`);
+      res.send(csv);
+    } catch (error) {
+      console.error("Export analytics error:", error);
+      res.status(500).json({ error: "Failed to export analytics" });
+    }
+  });
+
   // ==================== UNSUBSCRIBE ROUTES ====================
 
   app.get("/api/unsubscribe", async (req, res) => {

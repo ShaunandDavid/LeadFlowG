@@ -302,6 +302,20 @@ export async function createBooking(params: {
       bookedAt: new Date().toISOString(),
     });
 
+  // Record analytics event for booking
+  const { recordEvent } = await import('../lib/events');
+  await recordEvent({
+    tenantId,
+    leadId,
+    type: 'booked',
+    timestamp: new Date().toISOString(),
+    metadata: {
+      meetingTypeId,
+      datetime,
+      duration: meetingType.duration,
+    },
+  });
+
   // Mark sequence as completed if lead is in a sequence
   const progressSnapshot = await adminDb
     .collection('tenants')

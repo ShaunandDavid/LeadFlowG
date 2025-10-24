@@ -1,223 +1,253 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Progress } from "@/components/ui/progress";
-import { Badge } from "@/components/ui/badge";
-import { Calendar } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Download, TrendingUp, Mail, MousePointerClick, MessageSquare, Calendar } from 'lucide-react';
+
+interface AnalyticsData {
+  date: string;
+  send_ok?: number;
+  open?: number;
+  click?: number;
+  reply?: number;
+  booked?: number;
+  bounce?: number;
+  unsubscribe?: number;
+}
 
 export default function Analytics() {
-  // Mock data for visualization
-  const funnelData = [
-    { stage: "Imported", count: 1250, percentage: 100, color: "bg-blue-500" },
-    { stage: "Verified", count: 1100, percentage: 88, color: "bg-cyan-500" },
-    { stage: "Contacted", count: 850, percentage: 68, color: "bg-purple-500" },
-    { stage: "Replied", count: 180, percentage: 14.4, color: "bg-indigo-500" },
-    { stage: "Booked", count: 45, percentage: 3.6, color: "bg-green-500" },
-  ];
+  const [dateRange, setDateRange] = useState<'7d' | '30d' | '90d'>('30d');
 
-  const subjectLines = [
-    { subject: "Quick question about {{company}}", opens: 342, rate: 68.4 },
-    { subject: "Thought you'd find this interesting", opens: 298, rate: 59.6 },
-    { subject: "{{firstName}}, following up", opens: 267, rate: 53.4 },
-    { subject: "Re: {{company}} outreach", opens: 245, rate: 49.0 },
-    { subject: "Quick win for {{company}}", opens: 223, rate: 44.6 },
-  ];
+  // Calculate date range
+  const getDateRange = () => {
+    const endDate = new Date();
+    const startDate = new Date();
+    
+    switch (dateRange) {
+      case '7d':
+        startDate.setDate(startDate.getDate() - 7);
+        break;
+      case '30d':
+        startDate.setDate(startDate.getDate() - 30);
+        break;
+      case '90d':
+        startDate.setDate(startDate.getDate() - 90);
+        break;
+    }
 
-  const templates = [
-    { name: "Roofing - Initial Outreach", sent: 450, replied: 68, rate: 15.1 },
-    { name: "Dental - Follow-up", sent: 380, replied: 52, rate: 13.7 },
-    { name: "Solar - Value Prop", sent: 320, replied: 38, rate: 11.9 },
-    { name: "HVAC - Pain Point", sent: 290, replied: 31, rate: 10.7 },
-  ];
+    const formatDate = (d: Date) => {
+      return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    return {
+      startDate: formatDate(startDate),
+      endDate: formatDate(endDate),
+    };
+  };
+
+  const { startDate, endDate } = getDateRange();
+
+  const { data: analytics = [], isLoading } = useQuery<AnalyticsData[]>({
+    queryKey: ['/api/analytics', { startDate, endDate }],
+  });
+
+  // Aggregate totals
+  const totals = analytics.reduce(
+    (acc, day) => ({
+      sends: acc.sends + (day.send_ok || 0),
+      opens: acc.opens + (day.open || 0),
+      clicks: acc.clicks + (day.click || 0),
+      replies: acc.replies + (day.reply || 0),
+      bookings: acc.bookings + (day.booked || 0),
+      bounces: acc.bounces + (day.bounce || 0),
+      unsubscribes: acc.unsubscribes + (day.unsubscribe || 0),
+    }),
+    { sends: 0, opens: 0, clicks: 0, replies: 0, bookings: 0, bounces: 0, unsubscribes: 0 }
+  );
+
+  // Calculate rates
+  const openRate = totals.sends > 0 ? (totals.opens / totals.sends) * 100 : 0;
+  const clickRate = totals.opens > 0 ? (totals.clicks / totals.opens) * 100 : 0;
+  const replyRate = totals.sends > 0 ? (totals.replies / totals.sends) * 100 : 0;
+  const bookingRate = totals.sends > 0 ? (totals.bookings / totals.sends) * 100 : 0;
+
+  const handleExport = async () => {
+    try {
+      const res = await fetch(`/api/analytics/export?startDate=${startDate}&endDate=${endDate}`);
+      if (!res.ok) throw new Error('Failed to export');
+      
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `analytics-${startDate}-${endDate}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export failed:', error);
+    }
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Analytics</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Analyze performance and optimize your outreach campaigns
+          <h1 className="text-3xl font-bold" data-testid="text-analytics-title">Campaign Analytics</h1>
+          <p className="text-muted-foreground">
+            Track your outreach performance and optimize campaigns
           </p>
         </div>
-        <Button variant="outline" data-testid="button-date-range">
-          <Calendar className="h-4 w-4 mr-2" />
-          Last 30 Days
-        </Button>
+        <div className="flex gap-3">
+          <Select value={dateRange} onValueChange={(v: any) => setDateRange(v)}>
+            <SelectTrigger className="w-32" data-testid="select-date-range">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7d">Last 7 days</SelectItem>
+              <SelectItem value="30d">Last 30 days</SelectItem>
+              <SelectItem value="90d">Last 90 days</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button variant="outline" onClick={handleExport} data-testid="button-export-analytics">
+            <Download className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        </div>
       </div>
 
-      <Tabs defaultValue="overview">
-        <TabsList>
-          <TabsTrigger value="overview" data-testid="tab-analytics-overview">Overview</TabsTrigger>
-          <TabsTrigger value="subjects" data-testid="tab-analytics-subjects">Subject Lines</TabsTrigger>
-          <TabsTrigger value="times" data-testid="tab-analytics-times">Send Times</TabsTrigger>
-          <TabsTrigger value="templates" data-testid="tab-analytics-templates">Templates</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="overview" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Funnel Chart */}
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+        </div>
+      ) : (
+        <>
+          {/* KPI Cards */}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Conversion Funnel</CardTitle>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Emails Sent</CardTitle>
+                <Mail className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
-              <CardContent className="space-y-4">
-                {funnelData.map((stage, idx) => (
-                  <div key={stage.stage} className="space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-medium">
-                          {idx + 1}
-                        </div>
-                        <span className="font-medium">{stage.stage}</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-muted-foreground">{stage.count.toLocaleString()}</span>
-                        <Badge variant="outline" className="text-xs">
-                          {stage.percentage.toFixed(1)}%
-                        </Badge>
-                      </div>
-                    </div>
-                    <div className="relative">
-                      <div className="h-3 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className={`h-full ${stage.color} transition-all duration-500`}
-                          style={{ width: `${stage.percentage}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
+              <CardContent>
+                <div className="text-2xl font-bold" data-testid="metric-sends">{totals.sends.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">
+                  {totals.bounces} bounced, {totals.unsubscribes} unsubscribed
+                </p>
               </CardContent>
             </Card>
 
-            {/* Performance Over Time */}
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Performance Trends</CardTitle>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Open Rate</CardTitle>
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {[
-                    { metric: "Open Rate", value: 42.5, change: 3.2, trend: "up" },
-                    { metric: "Reply Rate", value: 12.8, change: 1.5, trend: "up" },
-                    { metric: "Booking Rate", value: 3.6, change: -0.3, trend: "down" },
-                    { metric: "Bounce Rate", value: 1.2, change: -0.5, trend: "up" },
-                  ].map((metric) => (
-                    <div key={metric.metric} className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium">{metric.metric}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg font-bold">{metric.value}%</span>
-                          <span className={`text-xs ${metric.trend === "up" && metric.metric !== "Bounce Rate" ? "text-green-600" : "text-red-600"}`}>
-                            {metric.change > 0 ? "+" : ""}{metric.change}%
-                          </span>
-                        </div>
-                      </div>
-                      <Progress value={metric.value * 2} className="h-2" />
-                    </div>
-                  ))}
+                <div className="text-2xl font-bold" data-testid="metric-open-rate">{openRate.toFixed(1)}%</div>
+                <p className="text-xs text-muted-foreground">
+                  {totals.opens.toLocaleString()} opens
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Click Rate</CardTitle>
+                <MousePointerClick className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold" data-testid="metric-click-rate">{clickRate.toFixed(1)}%</div>
+                <p className="text-xs text-muted-foreground">
+                  {totals.clicks.toLocaleString()} clicks
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Reply Rate</CardTitle>
+                <MessageSquare className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold" data-testid="metric-reply-rate">{replyRate.toFixed(1)}%</div>
+                <p className="text-xs text-muted-foreground">
+                  {totals.replies.toLocaleString()} replies
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Booking Conversion</CardTitle>
+                <CardDescription>Meetings booked from outreach</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-4xl font-bold" data-testid="metric-bookings">{totals.bookings.toLocaleString()}</div>
+                    <p className="text-sm text-muted-foreground mt-1">Total bookings</p>
+                  </div>
+                  <Calendar className="h-12 w-12 text-muted-foreground opacity-20" />
+                </div>
+                <div className="mt-4 flex items-baseline gap-2">
+                  <span className="text-2xl font-bold text-primary" data-testid="metric-booking-rate">{bookingRate.toFixed(2)}%</span>
+                  <span className="text-sm text-muted-foreground">booking rate</span>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Engagement Funnel</CardTitle>
+                <CardDescription>Track your lead progression</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Sent</span>
+                  <span className="font-medium">{totals.sends.toLocaleString()}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Opened</span>
+                  <span className="font-medium">{totals.opens.toLocaleString()} ({openRate.toFixed(1)}%)</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Clicked</span>
+                  <span className="font-medium">{totals.clicks.toLocaleString()} ({clickRate.toFixed(1)}%)</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Replied</span>
+                  <span className="font-medium">{totals.replies.toLocaleString()} ({replyRate.toFixed(1)}%)</span>
+                </div>
+                <div className="flex items-center justify-between border-t pt-3">
+                  <span className="text-sm font-medium">Booked</span>
+                  <span className="font-bold text-primary">{totals.bookings.toLocaleString()} ({bookingRate.toFixed(2)}%)</span>
                 </div>
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
 
-        <TabsContent value="subjects" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Subject Line Performance</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {subjectLines.map((line, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-4 rounded-lg border border-border hover-elevate">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="shrink-0">#{idx + 1}</Badge>
-                        <p className="font-mono text-sm truncate">{line.subject}</p>
-                      </div>
-                      <div className="mt-2">
-                        <Progress value={line.rate} className="h-1.5" />
-                      </div>
-                    </div>
-                    <div className="ml-4 text-right shrink-0">
-                      <div className="text-lg font-bold">{line.rate}%</div>
-                      <div className="text-xs text-muted-foreground">{line.opens} opens</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="times" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Send Time Heatmap</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((day) => (
-                  <div key={day} className="flex items-center gap-3">
-                    <div className="w-24 text-sm font-medium">{day}</div>
-                    <div className="flex-1 grid grid-cols-12 gap-1">
-                      {[...Array(12)].map((_, hour) => {
-                        const intensity = Math.random();
-                        return (
-                          <div
-                            key={hour}
-                            className="h-8 rounded"
-                            style={{
-                              backgroundColor: `hsl(221, 83%, ${85 - intensity * 32}%)`,
-                            }}
-                            title={`${hour + 8}:00 - ${intensity.toFixed(2)}% open rate`}
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-                <div className="flex items-center justify-between text-xs text-muted-foreground pt-2">
-                  <span>8 AM</span>
-                  <span>11 AM</span>
-                  <span>2 PM</span>
-                  <span>5 PM</span>
-                  <span>8 PM</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="templates" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Template Performance</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {templates.map((template, idx) => (
-                  <div key={idx} className="p-4 rounded-lg border border-border hover-elevate">
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <h4 className="font-medium">{template.name}</h4>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {template.sent} sent • {template.replied} replies
-                        </p>
-                      </div>
-                      <Badge variant="outline" className={template.rate > 12 ? "border-green-500 text-green-600" : ""}>
-                        {template.rate}% reply rate
-                      </Badge>
-                    </div>
-                    <Progress value={template.rate * 5} className="h-2" />
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+          {analytics.length === 0 && (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <TrendingUp className="h-12 w-12 text-muted-foreground opacity-20 mb-4" />
+                <p className="text-muted-foreground text-center">
+                  No analytics data available for the selected period.
+                  <br />
+                  Start sending campaigns to see your performance metrics.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
     </div>
   );
 }

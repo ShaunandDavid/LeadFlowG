@@ -118,6 +118,20 @@ export async function processUnsubscribe(params: {
       unsubscribeLink: token,
     },
   });
+
+  // Record analytics event for unsubscribe
+  const { recordEvent } = await import('../lib/events');
+  await recordEvent({
+    tenantId,
+    leadId,
+    type: 'unsubscribe',
+    userAgent,
+    ipAddress,
+    timestamp: new Date().toISOString(),
+    metadata: {
+      email,
+    },
+  });
   
   // Log unsubscribe event
   await adminDb

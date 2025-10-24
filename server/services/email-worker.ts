@@ -83,10 +83,46 @@ async function processSingleEmail(email: QueuedEmail): Promise<void> {
 
     // Substitute variables in subject and body
     const subject = substituteVariables(template.subject || 'Hello', lead);
-    const htmlBody = substituteVariables(template.body || '', lead);
+    let htmlBody = substituteVariables(template.body || '', lead);
     
     // Create text version (simple HTML strip)
     const textBody = htmlBody.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ');
+
+    const baseUrl = process.env.REPLIT_DOMAINS 
+      ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}`
+      : 'http://localhost:5000';
+
+    // Generate unique message ID for tracking
+    const messageId = `${tenantId}-${leadId}-${Date.now()}`;
+
+    // Inject click tracking
+    const { mintTrackingToken } = await import('../lib/track');
+    htmlBody = htmlBody.replace(
+      /href="(https?:\/\/[^"]+)"/gi,
+      (match, url) => {
+        const trackingToken = mintTrackingToken({
+          tenantId,
+          leadId,
+          sequenceId: email.sequenceId,
+          stepId: email.stepId,
+          messageId,
+          templateId,
+        });
+        const trackingUrl = `${baseUrl}/api/track/click/${trackingToken}?u=${encodeURIComponent(url)}`;
+        return `href="${trackingUrl}"`;
+      }
+    );
+
+    // Generate tracking pixel
+    const pixelToken = mintTrackingToken({
+      tenantId,
+      leadId,
+      sequenceId: email.sequenceId,
+      stepId: email.stepId,
+      messageId,
+      templateId,
+    });
+    const trackingPixel = `<img src="${baseUrl}/api/track/open.png?id=${pixelToken}" width="1" height="1" style="display:none" alt="" />`;
 
     // Generate unsubscribe URL
     const unsubscribeToken = generateUnsubscribeToken({
@@ -94,16 +130,13 @@ async function processSingleEmail(email: QueuedEmail): Promise<void> {
       leadId,
       email: lead.contact.email,
     });
-
-    const baseUrl = process.env.REPLIT_DOMAINS 
-      ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}`
-      : 'http://localhost:5000';
     
     const unsubscribeUrl = `${baseUrl}/unsubscribe?token=${unsubscribeToken}`;
 
-    // Add unsubscribe link to HTML body
-    const htmlWithUnsubscribe = `
+    // Add tracking pixel and unsubscribe link to HTML body
+    const htmlWithTracking = `
       ${htmlBody}
+      ${trackingPixel}
       <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px;">
         <p>Don't want to receive these emails? <a href="${unsubscribeUrl}" style="color: #3b82f6;">Unsubscribe</a></p>
       </div>
@@ -114,12 +147,25 @@ async function processSingleEmail(email: QueuedEmail): Promise<void> {
       tenantId,
       to: lead.contact.email,
       subject,
-      htmlBody: htmlWithUnsubscribe,
+      htmlBody: htmlWithTracking,
       textBody: textBody + `\n\nUnsubscribe: ${unsubscribeUrl}`,
       unsubscribeUrl,
     });
 
     console.log(`Email sent successfully: ${result.messageId} to ${lead.contact.email}`);
+
+    // Record send event in analytics
+    const { recordEvent } = await import('../lib/events');
+    await recordEvent({
+      tenantId,
+      leadId,
+      sequenceId: email.sequenceId,
+      stepId: email.stepId,
+      messageId,
+      templateId,
+      type: 'send_ok',
+      timestamp: new Date().toISOString(),
+    });
 
     // Mark as sent and update lead
     await markAsSent(tenantId, emailId);

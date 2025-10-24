@@ -1,0 +1,129 @@
+Ship #1 Campaign Analytics & Reporting first — it proves ROI and unlocks sales. Here’s ONE-STEP MODE to add it cleanly without touching your core loop.
+
+Where / Files
+
+pages/api/track/open.png — 1×1 pixel (open events)
+
+pages/api/track/click/[id].ts — click redirect (click events)
+
+lib/track.ts — helpers to mint track IDs, sign/verify
+
+lib/events.ts — write analytics events + rollups
+
+app/analytics/page.tsx — dashboards (KPIs, funnel, time-series, leaderboards)
+
+app/analytics/exports/page.tsx — CSV/PDF exports
+
+functions/jobs/rollupAnalytics.ts — nightly aggregates
+
+Email render path (where you build RFC822/HTML) — inject pixel + click wrappers
+
+Do / Paste (high level)
+
+Event schema (append, don’t replace)
+
+events: { tenantId, leadId?, sequenceId?, step?, type: 'open'|'click'|'reply'|'booked'|'send_ok'|'bounce'|'complaint'|'unsubscribe', messageId?, url?, ua?, ip?, ts }
+
+analytics/tenants/{tenantId}/daily/{YYYYMMDD}: rollups
+
+analytics/sequences/{sequenceId}/daily/{YYYYMMDD}: rollups
+
+analytics/templates/{templateId}/daily/{YYYYMMDD}: rollups
+
+Open tracking pixel
+
+Route GET /api/track/open.png?id=<signed> → verify signature, Content-Type: image/png, 1×1 transparent buffer, write events.open.
+
+Email HTML inject: <img src="https://YOURDOMAIN/api/track/open.png?id=${mint({tenantId, leadId, sequenceId, step, messageId})}" width="1" height="1" style="display:none" alt=""/>
+
+Guard: only add pixel for HTML emails.
+
+Click tracking
+
+Route GET /api/track/click/[id] → decode & verify, write events.click, 302 to u (original URL).
+
+Email link wrapper: replace href="${url}" with href="https://YOURDOMAIN/api/track/click/${mint({...})}?u=${encodeURIComponent(url)}"
+
+Helpers
+
+lib/track.ts: mint(payload) => base64url(JSON)+HMAC; verify(id) => throws if bad or expired (e.g., 14d).
+
+lib/events.ts: recordEvent(e) → write to events, enqueue rollup (pub/sub or batched write).
+
+Dashboards (app/analytics/page.tsx)
+
+Header KPIs (last 7/30 days): Sends, Opens %, Clicks %, Replies %, Bookings.
+
+Funnel: (import → verified → A/B/C → contacted → replied → booked → won).
+
+Time-series: stacked area (sends/opens/clicks/replies/bookings) by day.
+
+Leaderboards: Subject lines, Templates, Sequences (reply%, book%).
+
+Send-time heatmap: hour (0–23) × weekday (Mon–Sun) by reply rate.
+
+Filters: date range, sequence, template, list, rep.
+
+Nightly rollups
+
+functions/jobs/rollupAnalytics.ts: for each tenant/sequence/template:
+
+Aggregate events → daily docs.
+
+Precompute heatmap buckets and conversion rates.
+
+Scheduler: daily 02:00 tenant-local (or UTC).
+
+Exports
+
+app/analytics/exports/page.tsx:
+
+CSV buttons: Events, Sequence Summary, Template Leaderboard.
+
+PDF (server-side render): KPI snapshot + charts (use Headless Chrome/puppeteer or React-PDF).
+
+UI polish
+
+Show attribution (sequence/template/rep) in tooltips.
+
+Empty-state hints when data < 50 sends.
+
+“Compare sequences” toggle → side-by-side metrics.
+
+Expect
+
+Every sent email logs opens/clicks reliably (opens ~under-count in privacy clients; clicks and replies are truthy).
+
+Dashboard loads fast (rollups, not raw scans).
+
+CSV/PDF export works for client reports.
+
+Verify
+
+Send a test sequence to yourself, open + click → metrics move within seconds.
+
+Cross-check counts: send_ok ≥ open ≥ click; replies & bookings match your existing reply classifier and booking flow.
+
+Change date range & filters → numbers recompute consistently.
+
+If-not (fast fixes)
+
+Pixels blocked (Apple MPP): expect under-count; rely on clicks/replies/bookings for optimization decisions.
+
+Duplicate events: de-dupe by (messageId,type,step) within 24h window.
+
+Heavy queries: only query rollups in UI; keep raw events for audit/export.
+
+Data model tweaks (add now)
+
+sequences.steps[*]: add templateId, subject
+
+leads: add source and firstTouchTs
+
+runs: store messageId per step for join
+
+Bonus: quick wins after analytics
+
+A/B testing: Add variantId on step; split 50/50; auto-promote after N sends.
+
+Send-time optimization: Use your heatmap to pick tenant’s top 3 send windows; expose “Recommended window” in sequence editor.

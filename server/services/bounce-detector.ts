@@ -125,6 +125,20 @@ async function processBounce(params: {
     });
   }
 
+  // Record analytics event for bounce
+  const { recordEvent } = await import('../lib/events');
+  await recordEvent({
+    tenantId,
+    type: 'bounce',
+    messageId: bounce.messageId,
+    timestamp: new Date().toISOString(),
+    metadata: {
+      email: bounce.email,
+      bounceType: bounce.bounceType,
+      reason: bounce.reason,
+    },
+  });
+
   // Log bounce event
   await adminDb
     .collection('tenants')
