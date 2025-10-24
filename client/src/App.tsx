@@ -17,6 +17,7 @@ import Sequences from "@/pages/sequences";
 import Analytics from "@/pages/analytics";
 import Settings from "@/pages/settings";
 import Onboarding from "@/pages/onboarding";
+import BookingPage from "@/pages/booking";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: () => JSX.Element }) {
@@ -118,6 +119,7 @@ function Router() {
           />
         )}
       </Route>
+      <Route path="/book/:tenantId/:leadId" component={BookingPage} />
       <Route path="/">
         <Redirect to="/dashboard" />
       </Route>

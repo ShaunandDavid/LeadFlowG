@@ -1451,6 +1451,125 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== BOOKING ROUTES ====================
+
+  // Get booking configuration
+  app.get("/api/booking/config", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { getBookingConfig } = await import('./services/booking');
+      const config = await getBookingConfig(tenantId);
+
+      res.json(config || { enabled: false });
+    } catch (error) {
+      console.error("Get booking config error:", error);
+      res.status(500).json({ error: "Failed to get booking configuration" });
+    }
+  });
+
+  // Update booking configuration
+  app.put("/api/booking/config", authenticateToken, requireRole(['owner', 'admin']), async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { updateBookingConfig } = await import('./services/booking');
+      await updateBookingConfig(tenantId, req.body);
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Update booking config error:", error);
+      res.status(500).json({ error: "Failed to update booking configuration" });
+    }
+  });
+
+  // Get available slots (public endpoint)
+  app.get("/api/booking/:tenantId/slots", async (req, res) => {
+    try {
+      const { tenantId } = req.params;
+      const { startDate, endDate, meetingTypeId } = req.query;
+
+      if (!startDate || !endDate || !meetingTypeId) {
+        return res.status(400).json({ error: "Missing required parameters" });
+      }
+
+      const { getAvailableSlots } = await import('./services/booking');
+      const slots = await getAvailableSlots({
+        tenantId,
+        startDate: startDate as string,
+        endDate: endDate as string,
+        meetingTypeId: meetingTypeId as string,
+      });
+
+      res.json(slots);
+    } catch (error) {
+      console.error("Get available slots error:", error);
+      res.status(500).json({ error: "Failed to get available slots" });
+    }
+  });
+
+  // Create booking (public endpoint)
+  app.post("/api/booking/:tenantId/book", async (req, res) => {
+    try {
+      const { tenantId } = req.params;
+      const { leadId, meetingTypeId, datetime, attendeeEmail, attendeeName, notes } = req.body;
+
+      if (!leadId || !meetingTypeId || !datetime || !attendeeEmail || !attendeeName) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+
+      const { createBooking } = await import('./services/booking');
+      const result = await createBooking({
+        tenantId,
+        leadId,
+        meetingTypeId,
+        datetime,
+        attendeeEmail,
+        attendeeName,
+        notes,
+      });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Create booking error:", error);
+      res.status(500).json({ error: "Failed to create booking" });
+    }
+  });
+
+  // Get bookings for tenant
+  app.get("/api/bookings", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const bookingsSnapshot = await adminDb
+        .collection('tenants')
+        .doc(tenantId)
+        .collection('bookings')
+        .orderBy('datetime', 'desc')
+        .limit(100)
+        .get();
+
+      const bookings = bookingsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      res.json(bookings);
+    } catch (error) {
+      console.error("Get bookings error:", error);
+      res.status(500).json({ error: "Failed to get bookings" });
+    }
+  });
+
   const httpServer = createServer(app);
 
   return httpServer;
