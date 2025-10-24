@@ -50,12 +50,20 @@ export function verifyTrackingToken(token: string): TrackingPayload {
   
   const [encoded, providedSignature] = parts;
   
-  // Verify signature
+  // Verify signature using timing-safe comparison (P0 Security)
   const hmac = crypto.createHmac('sha256', SECRET);
   hmac.update(encoded);
   const expectedSignature = hmac.digest('base64url');
   
-  if (providedSignature !== expectedSignature) {
+  // Use crypto.timingSafeEqual to prevent timing attacks
+  const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
+  const providedBuffer = Buffer.from(providedSignature, 'utf8');
+  
+  if (expectedBuffer.length !== providedBuffer.length) {
+    throw new Error('Invalid token signature');
+  }
+  
+  if (!crypto.timingSafeEqual(expectedBuffer, providedBuffer)) {
     throw new Error('Invalid token signature');
   }
   
