@@ -46,3 +46,16 @@ AI-powered email reply classification system that automatically categorizes lead
 - **Automatic Lead Status Updates**: Updates lead status based on reply sentiment
 - **HTML Email Parsing**: Extracts text from HTML emails with fallback to keyword detection
 - **OpenAI Integration**: Uses GPT-4 for accurate sentiment analysis with graceful degradation
+
+### Campaign Analytics & Reporting
+Comprehensive analytics system for tracking and optimizing outreach performance:
+- **Tracking Infrastructure**: HMAC-signed tracking tokens (14-day expiry) for secure pixel and click tracking
+- **Open Tracking**: 1x1 pixel tracker embedded in all HTML emails, tracks when leads open emails
+- **Click Tracking**: Transparent redirect system wraps all email links to track clicks before redirecting to destination
+- **8 Event Types**: send_ok, open, click, reply, booked, bounce, complaint, unsubscribe
+- **Real-time Rollup Aggregation**: Automatic daily aggregation at tenant, sequence, and template levels using atomic Firebase increments
+- **Comprehensive Dashboard**: KPI cards (sends, open rate, click rate, reply rate), booking conversion metrics, engagement funnel visualization
+- **Date Range Filtering**: 7-day, 30-day, and 90-day views
+- **CSV Export**: Download raw analytics data for external analysis
+- **Timestamp Validation**: Multi-layer validation prevents corrupt rollup data with missing/invalid timestamps
+- **Event Sources**: Integrated across email worker, reply classifier, booking service, bounce detector, and unsubscribe handler
