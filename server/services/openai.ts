@@ -42,6 +42,77 @@ export interface ReplyClassification {
   extractedMeetingTimes?: string[];
 }
 
+// Hybrid scoring: Rules baseline + OpenAI tiebreaker
+function calculateRulesBaselineScore(lead: {
+  person?: {
+    title?: string;
+  };
+  company?: {
+    revenue?: number;
+    employeeCount?: number;
+    industry?: string;
+  };
+}): { grade: "A" | "B" | "C"; value: number; reason: string } {
+  let score = 50; // Start at baseline
+  const reasons: string[] = [];
+
+  // Title scoring
+  const title = lead.person?.title?.toLowerCase() || '';
+  if (title.includes('ceo') || title.includes('founder') || title.includes('owner')) {
+    score += 25;
+    reasons.push('decision-maker title');
+  } else if (title.includes('vp') || title.includes('director') || title.includes('head')) {
+    score += 15;
+    reasons.push('senior title');
+  } else if (title.includes('manager')) {
+    score += 5;
+    reasons.push('manager title');
+  }
+
+  // Company size scoring (revenue)
+  const revenue = lead.company?.revenue;
+  if (revenue) {
+    if (revenue >= 10000000) { // $10M+
+      score += 15;
+      reasons.push('large revenue');
+    } else if (revenue >= 1000000) { // $1M+
+      score += 10;
+      reasons.push('medium revenue');
+    }
+  }
+
+  // Employee count
+  const employees = lead.company?.employeeCount;
+  if (employees) {
+    if (employees >= 100) {
+      score += 10;
+      reasons.push('large team');
+    } else if (employees >= 20) {
+      score += 5;
+      reasons.push('established team');
+    }
+  }
+
+  // Cap at 100
+  score = Math.min(100, score);
+
+  // Determine grade
+  let grade: "A" | "B" | "C";
+  if (score >= 75) {
+    grade = "A";
+  } else if (score >= 50) {
+    grade = "B";
+  } else {
+    grade = "C";
+  }
+
+  return {
+    grade,
+    value: score,
+    reason: reasons.length > 0 ? reasons.join(', ') : 'baseline scoring',
+  };
+}
+
 export async function scoreLead(lead: {
   person?: {
     title?: string;
@@ -58,8 +129,24 @@ export async function scoreLead(lead: {
     email: string;
   };
 }): Promise<LeadScoreResult> {
+  // First, calculate rules-based score
+  const rulesScore = calculateRulesBaselineScore(lead);
+  
+  // If OpenAI is not available, return rules score
+  if (!isOpenAIAvailable()) {
+    return rulesScore;
+  }
+
+  // If score is clearly A or C, skip OpenAI (cost optimization)
+  if (rulesScore.value >= 85 || rulesScore.value <= 35) {
+    return rulesScore;
+  }
+
+  // Use OpenAI as tiebreaker for borderline cases (B grade range)
   try {
-    const prompt = `Score this B2B lead from A (highest) to C (lowest) based on fit and likelihood to convert.
+    const prompt = `You are a B2B lead scoring expert. A rules-based system scored this lead as "${rulesScore.grade}" (${rulesScore.value}/100) because: ${rulesScore.reason}.
+
+Analyze this lead and determine if the grade should be adjusted up or down:
 
 Lead Details:
 - Name: ${lead.person?.firstName} ${lead.person?.lastName}

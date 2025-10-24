@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -23,16 +23,104 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Lead } from "@shared/schema";
 
 export default function Leads() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
+  const [csvData, setCsvData] = useState("");
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const { toast } = useToast();
 
   const { data: leads, isLoading } = useQuery<Lead[]>({
     queryKey: ['/api/leads', statusFilter, search],
   });
+
+  const importMutation = useMutation({
+    mutationFn: async (csv: string) => {
+      const res = await apiRequest('POST', '/api/leads/import', { csv });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Import complete",
+        description: `Imported ${data.imported} leads, skipped ${data.skipped} duplicates`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'] });
+      setShowImportDialog(false);
+      setCsvData("");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Import failed",
+        description: error.message || "Failed to import leads",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const bulkMutation = useMutation({
+    mutationFn: async ({ operation, data }: { operation: string; data?: any }) => {
+      const res = await apiRequest('POST', '/api/leads/bulk', {
+        operation,
+        leadIds: Array.from(selectedLeads),
+        data,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Bulk operation complete",
+        description: `Updated ${selectedLeads.size} leads`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'] });
+      setSelectedLeads(new Set());
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Operation failed",
+        description: error.message || "Failed to perform bulk operation",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleExport = async () => {
+    try {
+      const response = await fetch('/api/leads/export', {
+        headers: {
+          'Authorization': `Bearer ${await (await import('@/lib/firebase')).auth.currentUser?.getIdToken()}`,
+        },
+      });
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'leads_export.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      toast({
+        title: "Export failed",
+        description: "Failed to export leads",
+        variant: "destructive",
+      });
+    }
+  };
 
   const toggleLead = (id: string) => {
     const newSelected = new Set(selectedLeads);
@@ -71,14 +159,47 @@ export default function Leads() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" data-testid="button-export-leads">
+          <Button variant="outline" onClick={handleExport} data-testid="button-export-leads">
             <Download className="h-4 w-4 mr-2" />
             Export
           </Button>
-          <Button data-testid="button-import-leads">
-            <Upload className="h-4 w-4 mr-2" />
-            Import Leads
-          </Button>
+          <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+            <DialogTrigger asChild>
+              <Button data-testid="button-import-leads">
+                <Upload className="h-4 w-4 mr-2" />
+                Import Leads
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Import Leads from CSV</DialogTitle>
+                <DialogDescription>
+                  Paste your CSV data below. Expected columns: email, firstName, lastName, title, company, domain, phone, industry, revenue, employeeCount
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <Textarea
+                  placeholder="email,firstName,lastName,title,company,domain&#10;john@example.com,John,Doe,CEO,Acme Inc,acme.com"
+                  value={csvData}
+                  onChange={(e) => setCsvData(e.target.value)}
+                  className="min-h-[300px] font-mono text-sm"
+                  data-testid="textarea-csv-import"
+                />
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setShowImportDialog(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => importMutation.mutate(csvData)}
+                    disabled={!csvData || importMutation.isPending}
+                    data-testid="button-confirm-import"
+                  >
+                    {importMutation.isPending ? "Importing..." : "Import"}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -114,16 +235,31 @@ export default function Leads() {
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-card border border-border shadow-lg rounded-lg p-4 flex items-center gap-4 z-50">
           <span className="text-sm font-medium">{selectedLeads.size} selected</span>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" data-testid="button-bulk-verify">
-              Verify
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => bulkMutation.mutate({ operation: 'suppress', data: { reason: 'Manual suppression' } })}
+              disabled={bulkMutation.isPending}
+              data-testid="button-bulk-suppress"
+            >
+              Suppress
             </Button>
-            <Button variant="outline" size="sm" data-testid="button-bulk-score">
-              Score
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => bulkMutation.mutate({ operation: 'updateStatus', data: { status: 'contacted' } })}
+              disabled={bulkMutation.isPending}
+              data-testid="button-bulk-mark-contacted"
+            >
+              Mark Contacted
             </Button>
-            <Button variant="outline" size="sm" data-testid="button-bulk-add-sequence">
-              Add to Sequence
-            </Button>
-            <Button variant="outline" size="sm" data-testid="button-bulk-delete">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => bulkMutation.mutate({ operation: 'delete' })}
+              disabled={bulkMutation.isPending}
+              data-testid="button-bulk-delete"
+            >
               Delete
             </Button>
           </div>

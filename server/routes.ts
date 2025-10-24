@@ -5,6 +5,7 @@ import { authenticateToken, requireRole, AuthRequest } from "./middleware/auth";
 import { scoreLead, classifyReply, isOpenAIAvailable } from "./services/openai";
 import { stripe, createCheckoutSession, createBillingPortalSession, isStripeAvailable, PLAN_CONFIGS } from "./services/stripe";
 import { provisionTenant, getTenantForUser } from "./services/tenant-provisioning";
+import { verifyEmail, verifyEmailBatch, isNeverBounceAvailable } from "./services/neverbounce";
 import { insertLeadSchema, insertSequenceSchema, insertTemplateSchema, insertListSchema } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -485,6 +486,173 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Verify single lead
+  app.post("/api/leads/:id/verify", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      if (!isNeverBounceAvailable()) {
+        return res.status(503).json({ 
+          error: "Email verification is not available - NeverBounce API key not configured" 
+        });
+      }
+
+      const tenantId = req.user?.tenantId;
+      const { id } = req.params;
+      
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const leadRef = adminDb.collection("tenants").doc(tenantId).collection("leads").doc(id);
+      const leadDoc = await leadRef.get();
+      
+      if (!leadDoc.exists) {
+        return res.status(404).json({ error: "Lead not found" });
+      }
+
+      const lead = leadDoc.data();
+      const email = lead?.contact?.email;
+      
+      if (!email) {
+        return res.status(400).json({ error: "Lead has no email address" });
+      }
+
+      // Check usage limits
+      const tenantRef = adminDb.collection("tenants").doc(tenantId);
+      const tenantDoc = await tenantRef.get();
+      const tenant = tenantDoc.data();
+      
+      if (tenant?.usage?.verificationsMonth >= tenant?.limits?.verificationsPerMonth) {
+        return res.status(429).json({ error: "Monthly verification limit exceeded" });
+      }
+
+      const verificationResult = await verifyEmail(email);
+      
+      // Map to our verification status
+      let verifyStatus: "passed" | "failed" | "risky" | "pending";
+      if (verificationResult.status === 'valid') {
+        verifyStatus = 'passed';
+      } else if (verificationResult.status === 'invalid') {
+        verifyStatus = 'failed';
+      } else if (verificationResult.status === 'disposable') {
+        verifyStatus = 'failed';
+      } else {
+        verifyStatus = 'risky';
+      }
+
+      // Update lead verification status
+      await leadRef.update({
+        verify: {
+          status: verifyStatus,
+          score: verificationResult.score,
+          flags: verificationResult.flags,
+          verifiedAt: new Date().toISOString(),
+        },
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Update tenant usage
+      await tenantRef.update({
+        'usage.verificationsMonth': (tenant?.usage?.verificationsMonth || 0) + 1,
+        'usage.leadsVerifiedMonth': (tenant?.usage?.leadsVerifiedMonth || 0) + 1,
+      });
+
+      res.json({ ...verificationResult, verifyStatus });
+    } catch (error) {
+      console.error("Verification error:", error);
+      res.status(500).json({ error: "Failed to verify email" });
+    }
+  });
+
+  // Bulk verify leads
+  app.post("/api/leads/bulk-verify", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      if (!isNeverBounceAvailable()) {
+        return res.status(503).json({ 
+          error: "Email verification is not available - NeverBounce API key not configured" 
+        });
+      }
+
+      const { leadIds } = req.body;
+      const tenantId = req.user?.tenantId;
+      
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      if (!Array.isArray(leadIds) || leadIds.length === 0) {
+        return res.status(400).json({ error: "Lead IDs required" });
+      }
+
+      // Check usage limits
+      const tenantRef = adminDb.collection("tenants").doc(tenantId);
+      const tenantDoc = await tenantRef.get();
+      const tenant = tenantDoc.data();
+      
+      const remaining = (tenant?.limits?.verificationsPerMonth || 0) - (tenant?.usage?.verificationsMonth || 0);
+      if (remaining < leadIds.length) {
+        return res.status(429).json({ 
+          error: `Insufficient verification credits. Need ${leadIds.length}, have ${remaining}` 
+        });
+      }
+
+      // Get leads and extract emails
+      const leadsSnapshot = await adminDb
+        .collection("tenants")
+        .doc(tenantId)
+        .collection("leads")
+        .where('__name__', 'in', leadIds.slice(0, 10)) // Firestore 'in' limit
+        .get();
+
+      const emails = leadsSnapshot.docs
+        .map(doc => doc.data()?.contact?.email)
+        .filter(Boolean) as string[];
+
+      // Verify in batch
+      const results = await verifyEmailBatch(emails);
+      
+      // Update leads
+      const batch = adminDb.batch();
+      const now = new Date().toISOString();
+      
+      results.forEach((result, idx) => {
+        const doc = leadsSnapshot.docs[idx];
+        if (doc) {
+          let verifyStatus: "passed" | "failed" | "risky";
+          if (result.status === 'valid') {
+            verifyStatus = 'passed';
+          } else if (result.status === 'invalid' || result.status === 'disposable') {
+            verifyStatus = 'failed';
+          } else {
+            verifyStatus = 'risky';
+          }
+
+          batch.update(doc.ref, {
+            verify: {
+              status: verifyStatus,
+              score: result.score,
+              flags: result.flags,
+              verifiedAt: now,
+            },
+            updatedAt: now,
+          });
+        }
+      });
+
+      await batch.commit();
+
+      // Update tenant usage
+      await tenantRef.update({
+        'usage.verificationsMonth': (tenant?.usage?.verificationsMonth || 0) + results.length,
+        'usage.leadsVerifiedMonth': (tenant?.usage?.leadsVerifiedMonth || 0) + results.length,
+      });
+
+      res.json({ verified: results.length, results });
+    } catch (error) {
+      console.error("Bulk verification error:", error);
+      res.status(500).json({ error: "Failed to verify emails" });
+    }
+  });
+
   app.post("/api/leads/:id/score", authenticateToken, async (req: AuthRequest, res) => {
     try {
       if (!isOpenAIAvailable()) {
@@ -590,6 +758,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ==================== TEMPLATES ROUTES ====================
   
+  // Get industry template packs (predefined templates)
+  app.get("/api/templates/industry-packs", authenticateToken, async (req: AuthRequest, res) => {
+    const { INDUSTRY_TEMPLATES } = await import('./services/template');
+    res.json(INDUSTRY_TEMPLATES);
+  });
+
   app.get("/api/templates", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const tenantId = req.user?.tenantId;
@@ -622,6 +796,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Fetch templates error:", error);
       res.status(500).json({ error: "Failed to fetch templates" });
+    }
+  });
+
+  app.post("/api/templates", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const validated = insertTemplateSchema.parse(req.body);
+      const { extractVariables } = await import('./services/template');
+      
+      // Extract variables from body and subject
+      const bodyVariables = extractVariables(validated.body);
+      const subjectVariables = validated.subject ? extractVariables(validated.subject) : [];
+      const allVariables = Array.from(new Set([...bodyVariables, ...subjectVariables]));
+      
+      const templateRef = adminDb
+        .collection("tenants")
+        .doc(tenantId)
+        .collection("templates")
+        .doc();
+
+      const now = new Date().toISOString();
+      const templateData = {
+        ...validated,
+        tenantId,
+        variables: allVariables,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      await templateRef.set(templateData);
+
+      res.status(201).json({
+        id: templateRef.id,
+        ...templateData,
+      });
+    } catch (error) {
+      console.error("Create template error:", error);
+      res.status(500).json({ error: "Failed to create template" });
     }
   });
 
