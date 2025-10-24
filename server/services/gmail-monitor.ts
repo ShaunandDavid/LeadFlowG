@@ -109,18 +109,50 @@ export async function checkForNewReplies(tenantId: string): Promise<void> {
         const leadDoc = leadSnapshot.docs[0];
         const leadId = leadDoc.id;
 
-        // Get message body
+        // Get message body (prefer text/plain, fallback to HTML with tag stripping)
         let body = '';
-        if (message.data.payload?.parts) {
-          // Multipart message
-          for (const part of message.data.payload.parts) {
-            if (part.mimeType === 'text/plain' && part.body?.data) {
+        let htmlBody = '';
+        
+        const extractBody = (parts: any[]): void => {
+          for (const part of parts) {
+            if (part.parts) {
+              // Recursive for nested multipart
+              extractBody(part.parts);
+            } else if (part.mimeType === 'text/plain' && part.body?.data) {
               body += Buffer.from(part.body.data, 'base64').toString('utf-8');
+            } else if (part.mimeType === 'text/html' && part.body?.data) {
+              htmlBody += Buffer.from(part.body.data, 'base64').toString('utf-8');
             }
           }
+        };
+        
+        if (message.data.payload?.parts) {
+          // Multipart message
+          extractBody(message.data.payload.parts);
         } else if (message.data.payload?.body?.data) {
           // Simple message
-          body = Buffer.from(message.data.payload.body.data, 'base64').toString('utf-8');
+          const mimeType = message.data.payload.mimeType;
+          const bodyData = Buffer.from(message.data.payload.body.data, 'base64').toString('utf-8');
+          if (mimeType === 'text/plain') {
+            body = bodyData;
+          } else if (mimeType === 'text/html') {
+            htmlBody = bodyData;
+          }
+        }
+
+        // If no plain text, strip HTML tags from HTML body
+        if (!body && htmlBody) {
+          body = htmlBody
+            .replace(/<style[^>]*>.*?<\/style>/gis, '')
+            .replace(/<script[^>]*>.*?<\/script>/gis, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/\s+/g, ' ')
+            .trim();
         }
 
         if (!body) {
@@ -176,7 +208,11 @@ export async function pollAllTenantsForReplies(): Promise<void> {
       const tenantId = tenantDoc.id;
       await checkForNewReplies(tenantId);
     }
-  } catch (error) {
+  } catch (error: any) {
+    // Silently skip if Firestore not configured (dev environment)
+    if (error.message?.includes('ECONNREFUSED') || error.message?.includes('metadata') || error.code === 2) {
+      return;
+    }
     console.error('Error polling tenants for replies:', error);
   }
 }

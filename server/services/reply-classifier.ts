@@ -1,7 +1,8 @@
 // Reply classification service - uses OpenAI to classify email replies
-import { openai, isOpenAIAvailable } from './openai';
+import { isOpenAIAvailable } from './openai';
 import { adminDb } from '../lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
+import OpenAI from 'openai';
 
 export type ReplyCategory = 'positive' | 'neutral' | 'ooo' | 'not_interested' | 'booked' | 'unsubscribe';
 
@@ -61,6 +62,7 @@ Analyze this reply and respond in JSON format:
 }`;
 
   try {
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
@@ -78,8 +80,16 @@ Analyze this reply and respond in JSON format:
     });
 
     const result = JSON.parse(completion.choices[0].message.content || '{}');
+    
+    // Normalize category (trim, lowercase, validate)
+    const rawCategory = (result.category || 'neutral').toString().trim().toLowerCase();
+    const validCategories: ReplyCategory[] = ['positive', 'neutral', 'ooo', 'not_interested', 'booked', 'unsubscribe'];
+    const category: ReplyCategory = validCategories.includes(rawCategory as ReplyCategory) 
+      ? (rawCategory as ReplyCategory)
+      : 'neutral';
+    
     return {
-      category: result.category || 'neutral',
+      category,
       confidence: result.confidence || 0.5,
       reason: result.reason || 'AI classification',
       extractedInfo: result.extractedInfo,

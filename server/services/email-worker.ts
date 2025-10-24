@@ -139,10 +139,11 @@ async function processSingleEmail(email: QueuedEmail): Promise<void> {
  * Process emails from the queue (batch processing)
  */
 export async function processEmailQueue(batchSize: number = 10): Promise<void> {
-  // Get all tenants
-  const tenantsSnapshot = await adminDb.collection('tenants').get();
+  try {
+    // Get all tenants
+    const tenantsSnapshot = await adminDb.collection('tenants').get();
 
-  for (const tenantDoc of tenantsSnapshot.docs) {
+    for (const tenantDoc of tenantsSnapshot.docs) {
     const tenantId = tenantDoc.id;
 
     try {
@@ -173,6 +174,13 @@ export async function processEmailQueue(batchSize: number = 10): Promise<void> {
     } catch (error) {
       console.error(`Error processing queue for tenant ${tenantId}:`, error);
     }
+  }
+  } catch (error: any) {
+    // Silently skip if Firestore not configured (dev environment)
+    if (error.message?.includes('ECONNREFUSED') || error.message?.includes('metadata') || error.code === 2) {
+      return;
+    }
+    console.error('Error processing email queue:', error);
   }
 }
 
