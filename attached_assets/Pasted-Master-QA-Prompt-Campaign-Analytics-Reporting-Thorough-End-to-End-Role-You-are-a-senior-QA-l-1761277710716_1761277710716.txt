@@ -1,0 +1,216 @@
+Master QA Prompt — Campaign Analytics & Reporting (Thorough End-to-End)
+
+Role: You are a senior QA lead. Execute a complete black-box + gray-box test of the Campaign Analytics & Reporting system. Verify correctness, resilience, and UX polish. Document every finding with repro steps, expected vs. actual, screenshots (if available), and severity.
+
+Context (what’s implemented)
+
+Tracking tokens: HMAC-signed, 14-day expiry (server/lib/track.ts), mint + verify for pixels and click redirects.
+
+Events: send_ok, open, click, reply, booked, bounce, complaint, unsubscribe.
+
+Aggregation: Real-time rollups at tenant, sequence, template; atomic Firebase increments; multi-layer timestamp validation fix so rollup keys are valid YYYYMMDD.
+
+Endpoints:
+
+GET /api/track/open.png — 1x1 pixel, records opens, returns PNG even on errors.
+
+GET /api/track/click/:id — tracks before redirect, records UA/IP.
+
+GET /api/analytics — date-ranged aggregate.
+
+GET /api/analytics/sequences/:id — sequence-specific.
+
+GET /api/analytics/export — CSV of raw events.
+
+Email Worker Integration: pixel injection, link wrapping, send_ok emits.
+
+Analytics UI: client/src/pages/analytics.tsx with KPI cards (sent/open/click/reply), booking metrics, funnel, date-range (7d/30d/90d), CSV export, empty state.
+
+Test Environment
+
+Base URL: <SET BASE_URL, e.g., http://localhost:3000>
+
+Auth: <SET if needed>
+
+Test tenant(s): <TENANT_A>, <TENANT_B> (one with rich data, one sparse/empty)
+
+Sequence IDs: <SEQ_ID_RICH>, <SEQ_ID_EMPTY>
+
+Objectives
+
+Data correctness across all endpoints and UI.
+
+All buttons and controls function: enabled/disabled states, hover/focus, loading, errors, responsive.
+
+Resilience: bad tokens, expired tokens, missing timestamps, replay safety (no double counts), extreme date ranges.
+
+Security/Privacy sanity: no PII leakage in analytics; tracking endpoints do not expose secrets; PNG always returned.
+
+UX polish: empty state, skeletons/spinners, copywriting, alignment, accessibility.
+
+Test Plan
+A. Smoke & Navigation
+
+Open Analytics page. Confirm page loads without console errors.
+
+Validate presence and readability of: KPI cards, Booking conversion, Engagement Funnel, Date Range selector (7d/30d/90d), CSV Export button, Empty State (for empty tenant).
+
+B. Buttons & Controls (every button, every state)
+
+For each interactive element (tabs, date-range chips, export buttons, funnels, card CTAs, pagination if present):
+
+Verify: default, hover, active, disabled, focus outline, keyboard navigation (Tab/Shift+Tab/Enter/Space).
+
+Confirm loading indicators appear and disappear appropriately on data fetch.
+
+Try double-clicks and rapid clicks for idempotency.
+
+Resize viewport (mobile/tablet/desktop) and confirm no overlap or truncation.
+
+C. Date Range Behavior
+
+Switch between 7d, 30d, 90d and a custom range if available.
+
+Confirm requests to GET /api/analytics include correct from/to params.
+
+Validate aggregates shift as expected (e.g., fewer events for 7d than 90d).
+
+Edge cases:
+
+Start > End (expect validation error and no crash).
+
+Far-past range (no data → empty state).
+
+Today-only with no events (empty state copy is helpful).
+
+D. Sequence-Specific Analytics
+
+Navigate to or call GET /api/analytics/sequences/:id for <SEQ_ID_RICH> and <SEQ_ID_EMPTY>.
+
+Validate KPI math vs. rollups; ensure empty sequence shows the empty state with guidance.
+
+E. CSV Export
+
+Click CSV Export; ensure download starts and file name is sensible (analytics-<tenant>-<YYYYMMDD>.csv).
+
+Open CSV and verify schema: timestamps, event types, tenant/sequence/template IDs, UA/IP fields as designed.
+
+Confirm no secret keys or PII beyond intended fields.
+
+Correlate a few rows with UI aggregates for spot-check.
+
+F. Tracking Pixel (/api/track/open.png)
+
+Call with valid token → 200 PNG; event open recorded once.
+
+Call with expired token → still 200 PNG, but event should not increment aggregates.
+
+Call with tampered token → 200 PNG, event rejected; verify warning log (if visible).
+
+Call without UA/IP headers → event recorded with fallbacks, no NaN dates.
+
+Repeat same request twice rapidly → aggregates should not double if idempotency exists or should intentionally double if spec’d (note the behavior).
+
+G. Click Redirect (/api/track/click/:id)
+
+Valid ID → 302 to destination, click captured with UA/IP.
+
+Invalid/unknown ID → 302 to safe fallback (e.g., homepage), event not counted; confirm alert/log.
+
+Velocity test: 5 rapid clicks; verify no abnormal double counts if dedupe exists (record observation either way).
+
+H. Event Integrity & Timestamp Validation
+
+Submit events with: missing timestamp, malformed timestamp, future timestamp.
+
+Layer 1 (recordEvent) applies fallback + logs warnings.
+
+Layer 2 (updateRollups) aborts on invalid dates.
+
+Confirm no NaNNaNNaN keys are created; final rollup keys are YYYYMMDD.
+
+I. Funnel & KPI Math
+
+Validate: Sent ≥ Opened ≥ Clicked ≥ Replied ≥ Booked (monotonicity).
+
+Check that rates = counts / denominator (e.g., Open Rate = opens/sent).
+
+Cross-verify 2–3 dates manually via GET /api/analytics?from=X&to=Y and CSV.
+
+J. Error Handling & Empty States
+
+Force 500s from analytics API (simulate network failure).
+
+UI shows error state with retry action, not a blank page.
+
+Verify empty tenant shows the designed empty copy and no console noise.
+
+K. Accessibility & Content
+
+Keyboard-only path covers every control.
+
+ARIA labels on buttons and data regions (charts, cards).
+
+Tooltips/help text: check for jargon; ensure consistent capitalization and units.
+
+Light/dark mode (if applicable) contrast sufficient.
+
+L. Security & Privacy Quick Checks
+
+Tokens never appear in UI or logs.
+
+PNG endpoint never leaks stack traces; always returns a valid 1x1 PNG.
+
+IP/UA handling respects minimization rules (hashing or coarse geo if implemented).
+
+Gray-Box/API Checklist (curl or REST client)
+
+GET /api/analytics?from=<YYYY-MM-DD>&to=<YYYY-MM-DD>
+
+GET /api/analytics/sequences/<SEQ_ID>?from=…&to=…
+
+GET /api/analytics/export?from=…&to=…
+
+GET /api/track/open.png?t=<VALID_TOKEN> (and: expired, tampered, missing)
+
+GET /api/track/click/<ID> (valid, invalid)
+
+Record: status codes, headers (cache, content-type), and payload shapes. Compare totals against UI.
+
+Bot/Proxy Sanity (if heuristics present or to prep for next phase)
+
+Trigger opens via known email proxy (e.g., Apple MPP-like behavior if you can emulate).
+
+Ensure suspect events are either flagged or can be filtered visually.
+
+Reporting Format
+
+For each issue or observation:
+
+Title: short and specific
+
+Type: Bug / UX / Performance / Content / Accessibility
+
+Severity: P0 blocker / P1 major / P2 minor / P3 nit
+
+Steps to Reproduce: 1…2…3…
+
+Expected vs. Actual
+
+Evidence: screenshot/console log/response sample
+
+Scope: tenant(s), browser(s), viewport(s)
+
+Notes/Guesses: optional
+
+Exit Criteria (pass conditions)
+
+No P0/P1 issues.
+
+All buttons/controls behave correctly across states and keyboard use.
+
+No NaN rollup keys; analytics math consistent across UI/API/CSV.
+
+PNG endpoint always returns a valid image; click redirect always resolves deterministically.
+
+CSV matches aggregates to ±1% (timing/rounding), filenames sensible.
