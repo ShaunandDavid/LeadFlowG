@@ -20,7 +20,16 @@ The UI/UX follows a Linear-inspired professional B2B SaaS design, featuring the 
 
 ## Production-Ready Features
 
-### Native Booking Page (NEW)
+### Email Deliverability Safeguards
+Comprehensive compliance and deliverability protection system:
+- **Unsubscribe System**: Cryptographically-signed tokens, automatic link embedding in all emails, public unsubscribe page
+- **Bounce Detection**: Automated Gmail API monitoring every 5 minutes, parses bounce notifications (mailer-daemon, postmaster), categorizes hard vs. soft bounces
+- **Suppression List Management**: Global do-not-contact enforcement, prevents sends to unsubscribed/bounced addresses, tenant-scoped and platform-level blocking
+- **Automatic Lead Status Updates**: Lead status updates to "unsubscribed" or "bounced" based on suppression reason
+- **Compliance UI**: Admin interface for viewing/searching suppressed emails, manual add/remove, bulk operations, CSV export
+- **Email Worker Integration**: Pre-send suppression checks prevent emails to blocked addresses, unsubscribe links auto-embedded in all outreach
+
+### Native Booking Page
 A white-label booking page that allows leads to schedule meetings directly from outreach emails. Features include:
 - **Public Booking Interface**: Accessible at `/book/:tenantId/:leadId` without authentication
 - **Configurable Meeting Types**: Multiple meeting types with customizable durations, descriptions, locations (Google Meet, Zoom, Phone, In-Person)
