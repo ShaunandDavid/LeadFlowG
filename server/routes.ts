@@ -1151,8 +1151,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.send(pixel);
       }
 
-      const { verifyTrackingToken } = await import('../lib/track');
-      const { recordEvent } = await import('../lib/events');
+      const { verifyTrackingToken } = await import('./lib/track');
+      const { recordEvent } = await import('./lib/events');
       
       // Verify token
       const payload = verifyTrackingToken(id);
@@ -1201,8 +1201,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).send('Invalid tracking link');
       }
 
-      const { verifyTrackingToken } = await import('../lib/track');
-      const { recordEvent } = await import('../lib/events');
+      // Validate URL to prevent open redirects (P0 Security)
+      const decodedUrl = decodeURIComponent(u);
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(decodedUrl);
+        // Only allow http/https schemes
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+          console.warn('Invalid URL scheme in click tracking:', parsedUrl.protocol);
+          return res.status(400).send('Invalid URL');
+        }
+      } catch (e) {
+        console.warn('Invalid URL in click tracking:', decodedUrl);
+        return res.status(400).send('Invalid URL');
+      }
+
+      const { verifyTrackingToken } = await import('./lib/track');
+      const { recordEvent } = await import('./lib/events');
       
       // Verify token
       const payload = verifyTrackingToken(id);
@@ -1216,22 +1231,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         messageId: payload.messageId,
         templateId: payload.templateId,
         type: 'click',
-        url: decodeURIComponent(u),
+        url: decodedUrl,
         userAgent: req.headers['user-agent'],
         ipAddress: req.ip,
         timestamp: new Date().toISOString(),
       });
 
-      // Redirect to original URL
-      res.redirect(302, decodeURIComponent(u));
+      // Safe redirect to validated URL
+      res.redirect(302, decodedUrl);
     } catch (error) {
       console.error('Click tracking error:', error);
-      // Redirect anyway to avoid breaking the user experience
-      if (req.query.u && typeof req.query.u === 'string') {
-        res.redirect(302, decodeURIComponent(req.query.u));
-      } else {
-        res.status(400).send('Invalid tracking link');
-      }
+      // Do NOT redirect on error - this prevents open redirect attacks
+      res.status(400).send('Invalid tracking link');
     }
   });
 
@@ -1244,15 +1255,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { startDate, endDate } = req.query;
-      if (!startDate || !endDate) {
+      
+      // Validate required parameters (P1)
+      if (!startDate || !endDate || typeof startDate !== 'string' || typeof endDate !== 'string') {
         return res.status(400).json({ error: "Start date and end date required" });
       }
 
-      const { getTenantAnalytics } = await import('../lib/events');
+      // Validate date format (YYYYMMDD)
+      const dateRegex = /^\d{8}$/;
+      if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
+        return res.status(400).json({ error: "Invalid date format. Use YYYYMMDD" });
+      }
+
+      const { getTenantAnalytics } = await import('./lib/events');
       const analytics = await getTenantAnalytics({
-        tenantId,
-        startDate: startDate as string,
-        endDate: endDate as string,
+        tenantId, // Tenant isolation enforced by authenticateToken
+        startDate,
+        endDate,
       });
 
       res.json(analytics);
@@ -1273,15 +1292,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { sequenceId } = req.params;
       const { startDate, endDate } = req.query;
       
-      if (!startDate || !endDate) {
+      // Validate required parameters (P1)
+      if (!startDate || !endDate || typeof startDate !== 'string' || typeof endDate !== 'string') {
         return res.status(400).json({ error: "Start date and end date required" });
       }
 
-      const { getSequenceAnalytics } = await import('../lib/events');
+      // Validate date format (YYYYMMDD)
+      const dateRegex = /^\d{8}$/;
+      if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
+        return res.status(400).json({ error: "Invalid date format. Use YYYYMMDD" });
+      }
+
+      // Verify sequence belongs to tenant (P0 - tenant isolation)
+      const sequenceDoc = await adminDb
+        .collection('tenants')
+        .doc(tenantId)
+        .collection('sequences')
+        .doc(sequenceId)
+        .get();
+      
+      if (!sequenceDoc.exists) {
+        return res.status(404).json({ error: "Sequence not found" });
+      }
+
+      const { getSequenceAnalytics } = await import('./lib/events');
       const analytics = await getSequenceAnalytics({
         sequenceId,
-        startDate: startDate as string,
-        endDate: endDate as string,
+        startDate,
+        endDate,
       });
 
       res.json(analytics);
@@ -1300,37 +1338,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { startDate, endDate } = req.query;
-      if (!startDate || !endDate) {
+      
+      // Validate required parameters (P1)
+      if (!startDate || !endDate || typeof startDate !== 'string' || typeof endDate !== 'string') {
         return res.status(400).json({ error: "Start date and end date required" });
       }
 
-      const { getAnalyticsEvents } = await import('../lib/events');
+      // Validate date format (YYYYMMDD)
+      const dateRegex = /^\d{8}$/;
+      if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
+        return res.status(400).json({ error: "Invalid date format. Use YYYYMMDD" });
+      }
+
+      const { getAnalyticsEvents } = await import('./lib/events');
+      // Hard cap at 10k rows (P1)
       const events = await getAnalyticsEvents({
-        tenantId,
-        startDate: startDate as string,
-        endDate: endDate as string,
+        tenantId, // Tenant isolation enforced
+        startDate,
+        endDate,
         limit: 10000,
       });
 
-      // Convert to CSV
+      // Properly escape CSV data (P1)
+      const escapeCsvCell = (value: string): string => {
+        // Escape double quotes by doubling them
+        const escaped = String(value).replace(/"/g, '""');
+        // Wrap in quotes if contains comma, newline, or quote
+        if (escaped.includes(',') || escaped.includes('\n') || escaped.includes('"')) {
+          return `"${escaped}"`;
+        }
+        return escaped;
+      };
+
+      // Convert to CSV with proper escaping
       const headers = ['Timestamp', 'Type', 'Sequence', 'Step', 'Lead', 'Message ID', 'URL', 'User Agent'];
-      const rows = events.map(e => [
-        e.timestamp,
-        e.type,
-        e.sequenceId || '',
-        e.stepId || '',
-        e.leadId || '',
-        e.messageId || '',
-        e.url || '',
-        e.userAgent || '',
-      ]);
+      const headerRow = headers.map(escapeCsvCell).join(',');
+      
+      const dataRows = events.map(e => {
+        const row = [
+          e.timestamp || '',
+          e.type || '',
+          e.sequenceId || '',
+          e.stepId || '',
+          e.leadId || '',
+          e.messageId || '',
+          e.url || '',
+          e.userAgent || '',
+        ];
+        return row.map(escapeCsvCell).join(',');
+      });
 
-      const csv = [headers, ...rows]
-        .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-        .join('\n');
+      const csv = [headerRow, ...dataRows].join('\n');
 
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="analytics-${startDate}-${endDate}.csv"`);
+      // Format filename as analytics-YYYYMMDD-YYYYMMDD.csv (P1)
+      const filename = `analytics-${startDate}-${endDate}.csv`;
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.send(csv);
     } catch (error) {
       console.error("Export analytics error:", error);
