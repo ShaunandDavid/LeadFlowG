@@ -6,6 +6,7 @@ import { scoreLead, classifyReply, isOpenAIAvailable } from "./services/openai";
 import { stripe, createCheckoutSession, createBillingPortalSession, isStripeAvailable, PLAN_CONFIGS } from "./services/stripe";
 import { provisionTenant, getTenantForUser } from "./services/tenant-provisioning";
 import { verifyEmail, verifyEmailBatch, isNeverBounceAvailable } from "./services/neverbounce";
+import { getThrottleStatus, enqueueEmail, getNextBatch, advanceWarmupStage } from "./services/send-queue";
 import { insertLeadSchema, insertSequenceSchema, insertTemplateSchema, insertListSchema } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -838,6 +839,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Create template error:", error);
       res.status(500).json({ error: "Failed to create template" });
+    }
+  });
+
+  // ==================== QUEUE ROUTES ====================
+  
+  app.get("/api/queue/throttle", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const status = await getThrottleStatus(tenantId);
+      res.json(status);
+    } catch (error) {
+      console.error("Get throttle status error:", error);
+      res.status(500).json({ error: "Failed to get throttle status" });
+    }
+  });
+
+  app.get("/api/queue/next", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const batchSize = parseInt(req.query.batchSize as string) || 10;
+      const emails = await getNextBatch(tenantId, batchSize);
+      res.json(emails);
+    } catch (error) {
+      console.error("Get next batch error:", error);
+      res.status(500).json({ error: "Failed to get next batch" });
+    }
+  });
+
+  app.post("/api/queue/advance-warmup", authenticateToken, requireRole('admin'), async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      await advanceWarmupStage(tenantId);
+      const status = await getThrottleStatus(tenantId);
+      res.json(status);
+    } catch (error) {
+      console.error("Advance warmup error:", error);
+      res.status(500).json({ error: "Failed to advance warmup stage" });
     }
   });
 
