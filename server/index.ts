@@ -82,5 +82,10 @@ app.use((req, res, next) => {
     const { startEmailWorker } = await import('./services/email-worker');
     startEmailWorker(60000);
     log('Email worker started');
+    
+    // Start Gmail reply monitor (checks every 60 seconds)
+    const { startGmailMonitor } = await import('./services/gmail-monitor');
+    startGmailMonitor(60000);
+    log('Gmail monitor started');
   });
 })();

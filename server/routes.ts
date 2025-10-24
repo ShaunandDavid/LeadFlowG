@@ -1262,6 +1262,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== GMAIL REPLY MONITORING ====================
+
+  app.post("/api/gmail/check-replies", authenticateToken, requireRole(['owner', 'admin']), async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { checkForNewReplies } = await import('./services/gmail-monitor');
+      
+      // Trigger immediate check (don't await - run in background)
+      checkForNewReplies(tenantId).catch(console.error);
+      
+      res.json({ success: true, message: 'Reply check triggered' });
+    } catch (error) {
+      console.error("Check replies error:", error);
+      res.status(500).json({ error: "Failed to check replies" });
+    }
+  });
+
+  // Gmail webhook for push notifications (future enhancement)
+  app.post("/api/webhooks/gmail", async (req, res) => {
+    try {
+      // Gmail sends push notifications in Pub/Sub format
+      // Decode the message and extract historyId
+      const message = req.body.message;
+      if (!message || !message.data) {
+        return res.status(400).json({ error: "Invalid webhook payload" });
+      }
+
+      const data = JSON.parse(Buffer.from(message.data, 'base64').toString('utf-8'));
+      const { emailAddress, historyId } = data;
+
+      // Find tenant by email
+      const tokensSnapshot = await adminDb
+        .collectionGroup('tokens')
+        .where('email', '==', emailAddress)
+        .limit(1)
+        .get();
+
+      if (tokensSnapshot.empty) {
+        console.log(`No tenant found for email ${emailAddress}`);
+        return res.status(200).json({ success: true }); // Acknowledge anyway
+      }
+
+      // Extract tenant ID from document path
+      const tokenDoc = tokensSnapshot.docs[0];
+      const tenantId = tokenDoc.ref.parent.parent?.id;
+
+      if (tenantId) {
+        const { checkForNewReplies } = await import('./services/gmail-monitor');
+        checkForNewReplies(tenantId).catch(console.error);
+      }
+
+      res.status(200).json({ success: true });
+    } catch (error) {
+      console.error("Gmail webhook error:", error);
+      res.status(500).json({ error: "Webhook processing failed" });
+    }
+  });
+
   // ==================== GOOGLE OAUTH ROUTES ====================
 
   app.get("/api/oauth/google/start", authenticateToken, async (req: AuthRequest, res) => {
