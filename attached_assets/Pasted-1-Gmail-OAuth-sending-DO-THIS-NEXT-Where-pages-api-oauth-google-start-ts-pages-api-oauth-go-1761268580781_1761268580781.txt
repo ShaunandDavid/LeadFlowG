@@ -1,0 +1,339 @@
+1) Gmail OAuth (sending) — DO THIS NEXT
+
+Where:
+
+pages/api/oauth/google/start.ts
+
+pages/api/oauth/google/callback.ts
+
+lib/vendors/google.ts
+
+functions/jobs/sendEmail.ts (swap to Gmail OAuth path)
+
+Do / Paste (high level):
+
+start.ts: build auth URL with scopes gmail.send userinfo.email and state=tenantId.
+
+callback.ts: exchange code → access_token, refresh_token, expiry, store encrypted at /tenants/{id}/tokens/google.
+
+lib/vendors/google.ts: getGmailClient(tenantId) returns authed client (refreshes tokens).
+
+sendEmail.ts: call gmail.users.messages.send with RFC822 (base64url) + List-Unsubscribe header.
+
+Expect:
+
+“Connect Google” opens OAuth, returns connected email.
+
+Sending path uses the tenant’s Gmail, respects daily caps.
+
+Verify:
+
+Send test to your address, check headers + footers + unsubscribe link.
+
+Force token refresh by expiring expiry and re-send.
+
+If-not:
+
+400s at callback → check authorized redirect URIs.
+
+401 on send → invalid/expired refresh token; re-auth and rotate.
+
+2) Gmail Reply Classifier (positive/OOO/unsub/booked)
+
+Where:
+
+pages/api/hooks/gmail-webhook.ts
+
+functions/jobs/classifyReply.ts
+
+lib/ai.ts
+
+Do / Paste:
+
+Add Gmail Watch on connect (users.watch) to a Pub/Sub topic; fallback: 1-min poll with historyId.
+
+gmail-webhook.ts receives new message IDs → enqueue classifyReply.
+
+classifyReply.ts fetches thread, runs GPT classification → updates lead: status, adds event (reply_positive / ooo / unsub / booked).
+
+If booked intent → send booking link (below) or propose times inline.
+
+Expect:
+
+Replies flip statuses automatically; unsub triggers suppression.
+
+OOO detected → auto reschedule next step +X days.
+
+Verify:
+
+Reply “Not interested” → lead marked lost + suppressed.
+
+Reply “Let’s talk Tues 2pm” → booked intent detected.
+
+If-not:
+
+No webhook fires → re-create Gmail watch (they expire) and store historyId.
+
+3) Native Booking Page (Google Calendar)
+
+Where:
+
+app/book/[tenant]/[rep]/page.tsx
+
+lib/vendors/google.ts (calendar helpers)
+
+pages/api/book/create.ts
+
+Do / Paste:
+
+Page: show free/busy slots (7/14/30d) from rep’s connected Google Calendar.
+
+Create event via calendar.events.insert with Meet link; send confirmation email.
+
+Round-robin: lookup next rep with least meetings in last 14d if /book/{tenant} (no rep).
+
+Expect:
+
+Public link books directly onto client’s Calendar with Meet link.
+
+Meetings show on dashboard.
+
+Verify:
+
+Book 2 test slots; verify time zone and reminders.
+
+If-not:
+
+403 Calendar → missing scope calendar; re-auth.
+
+4) Metered Billing (emails + verifications)
+
+Where:
+
+functions/admin/stripeMeters.ts (cron)
+
+lib/billing/stripe.ts
+
+Increment counters in sendEmail.ts and verify.ts.
+
+Do / Paste:
+
+Increment /tenants/{id}/usage.emailsMonth and .verificationsMonth on each success.
+
+Nightly job: reportUsage(tenantId, meterId, quantity) to Stripe for both meters.
+
+Enforce hard/soft caps before queuing sends.
+
+Expect:
+
+Stripe invoices usage add-ons automatically.
+
+Over-limit tenants see a banner + sends pause.
+
+Verify:
+
+Simulate 110% usage → see add-on on next invoice.
+
+If-not:
+
+No meter items → check Stripe Price is metered and linked to subscription.
+
+5) Twilio SMS (optional but recommended)
+
+Where:
+
+functions/admin/provisionTwilioSubaccount.ts
+
+lib/vendors/twilio.ts
+
+functions/jobs/sendSms.ts
+
+Do / Paste:
+
+On enable: create sub-account, buy number, save creds encrypted.
+
+Sequence step type "sms" → queue sendSms.
+
+Webhook pages/api/hooks/twilio-status.ts updates delivery + STOP handling.
+
+Expect:
+
+SMS steps send; STOP → global suppress.
+
+Verify:
+
+Send test SMS; reply STOP; see suppression + audit event.
+
+If-not:
+
+21610 errors → messaging service/country settings; configure geo permissions.
+
+6) Resend Custom Domains (Pro/Agency)
+
+Where:
+
+app/settings/integrations wizard
+
+lib/vendors/resend.ts
+
+Do / Paste:
+
+Start domain link, show DNS records; poll until verified.
+
+Switch send path to Resend for high volume; keep Gmail for Starter.
+
+Expect:
+
+DKIM/SPF/DMARC all green; higher deliverability.
+
+Verify:
+
+dig txt check; send test → land in Primary/Inbox.
+
+If-not:
+
+DMARC fails → show corrective hint (p=none/quarantine).
+
+7) Secret Manager Migration (stop using env for tokens)
+
+Where:
+
+functions/config + GCP Secret Manager
+
+Replace Firestore token storage with Secret refs (store only pointer in Firestore).
+
+Do / Paste:
+
+Move refresh tokens & vendor auth to Secrets; wrap getters with KMS decryption; ensure Functions IAM has secretAccessor.
+
+Expect:
+
+No secrets in DB; rotation easy.
+
+Verify:
+
+Rotate a secret; app keeps working.
+
+If-not:
+
+403 on access → grant service account access to Secret.
+
+8) Analytics (click/open + funnel)
+
+Where:
+
+pages/api/track/open.png (1×1 pixel)
+
+pages/api/track/click/[id].ts (redirector)
+
+app/analytics/page.tsx
+
+Do / Paste:
+
+Inject pixel in email HTML (open event).
+
+Wrap all links through /api/track/click/:id?u=… (records then redirects).
+
+Compute funnel + leaderboards server-side; cache.
+
+Expect:
+
+Open/click metrics show; funnel renders.
+
+Verify:
+
+Click test link; see event recorded.
+
+If-not:
+
+Email client blocks pixel → rely on clicks + replies for truth.
+
+9) Admin Console & Ops
+
+Where:
+
+app/admin/* (protected to your org)
+
+functions/jobs/safetyGuards.ts (already)
+
+DLQ: firestore collection: queues.dead
+
+Do / Paste:
+
+Impersonate user; pause/resume tenant; requeue DLQ; rate-limit knobs; vendor health panel.
+
+Expect:
+
+Ops can fix anything without code.
+
+Verify:
+
+Force a DLQ item; requeue successfully.
+
+10) Observability & Backups
+
+Where:
+
+Sentry init (Next + Functions)
+
+PostHog (client + server events)
+
+BigQuery sink for /events
+
+GCS scheduled Firestore export
+
+Do / Paste:
+
+Add SDKs; stream events; nightly backup job via Scheduler.
+
+Expect:
+
+Errors visible; product usage tracked; backups in GCS.
+
+Verify:
+
+Trigger a handled error; see in Sentry.
+
+Confirm a backup file exists next day.
+
+11) Compliance & Data Rights
+
+Where:
+
+pages/api/privacy/export.ts, delete.ts
+
+Settings toggles for CASL/CTIA, physical address editor
+
+Do / Paste:
+
+Implement tenant-scoped export/delete endpoints; enforce SMS compliance toggles on send queue.
+
+Expect:
+
+Export zip; delete scrubs PII while preserving billing.
+
+Verify:
+
+Run export on a test tenant; validate contents.
+
+Final Order of Execution (fastest to revenue)
+
+Gmail OAuth send ✅
+
+Reply classifier ✅
+
+Booking page ✅
+
+Metered billing ✅
+
+Secret Manager ✅
+
+Click/open + funnel
+
+Admin console
+
+Twilio & Resend
+
+Observability + backups
+
+Compliance endpoints
