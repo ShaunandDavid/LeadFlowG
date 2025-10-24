@@ -160,12 +160,18 @@ export async function scheduleNextSteps(tenantId: string, runId: string): Promis
   const now = new Date();
   
   for (const progressDoc of progressSnapshot.docs) {
-    let progress = progressDoc.data();
-    let currentStepIndex = progress.currentStepIndex;
-    
     // Process steps in a loop until we hit a blocker (future wait or enqueue email)
     let maxIterations = 20; // Prevent infinite loops
+    
     while (maxIterations-- > 0) {
+      // Reload progress data to get fresh state after each update
+      const freshProgressDoc = await progressDoc.ref.get();
+      const progress = freshProgressDoc.data();
+      
+      if (!progress) break;
+      
+      const currentStepIndex = progress.currentStepIndex;
+      
       // Check if there are more steps
       if (currentStepIndex >= sequence.steps.length) {
         // Sequence complete for this lead
@@ -196,13 +202,12 @@ export async function scheduleNextSteps(tenantId: string, runId: string): Promis
         
         // If wait is complete, advance to next step and continue loop
         if (nextScheduledAt <= now) {
-          currentStepIndex++;
           await progressDoc.ref.update({
-            currentStepIndex,
+            currentStepIndex: currentStepIndex + 1,
             nextScheduledAt: null,
             updatedAt: new Date().toISOString(),
           });
-          // Continue loop to process next step
+          // Continue loop - next iteration will reload fresh data
           continue;
         } else {
           // Wait is still pending, save scheduled time and stop processing

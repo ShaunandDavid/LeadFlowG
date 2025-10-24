@@ -39,7 +39,7 @@ Production-grade white-label B2B outreach automation platform with multi-tenant 
      - Transactional job claims to prevent double-sends
    - Retry logic with exponential backoff (3 attempts)
 
-6. **Sequence Execution Engine** 🚧 (In Progress - 85% Complete)
+6. **Sequence Execution Engine** ✅
    - Multi-step sequence orchestration
    - Lead progress tracking with currentStepIndex
    - Step types: email, wait
@@ -49,7 +49,8 @@ Production-grade white-label B2B outreach automation platform with multi-tenant 
    - Duplicate send prevention via enqueuedStepId
    - markStepComplete triggers next step scheduling
    - processAllPendingSteps() cron endpoint for wait resumption
-   - Known issue: Wait anchor logic needs transaction-based reload for full autonomy
+   - Fresh state reload each iteration (fixes stale snapshot issue)
+   - Autonomous progression through wait→email→wait chains
 
 ## Recent Changes (Previous Session)
 
