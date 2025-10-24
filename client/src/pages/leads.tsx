@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiMutation, getCurrentIdToken } from "@/lib/queryClient";
 import type { Lead } from "@shared/schema";
 
 export default function Leads() {
@@ -45,13 +45,22 @@ export default function Leads() {
   const { toast } = useToast();
 
   const { data: leads, isLoading } = useQuery<Lead[]>({
-    queryKey: ['/api/leads', statusFilter, search],
+    queryKey: [
+      "/api/leads",
+      {
+        status: statusFilter,
+        search: search.trim() ? search.trim() : undefined,
+      },
+    ],
   });
 
   const importMutation = useMutation({
     mutationFn: async (csv: string) => {
-      const res = await apiRequest('POST', '/api/leads/import', { csv });
-      return res.json();
+      return apiMutation({
+        path: '/api/leads/import',
+        method: 'POST',
+        body: { csv },
+      });
     },
     onSuccess: (data: any) => {
       toast({
@@ -73,12 +82,15 @@ export default function Leads() {
 
   const bulkMutation = useMutation({
     mutationFn: async ({ operation, data }: { operation: string; data?: any }) => {
-      const res = await apiRequest('POST', '/api/leads/bulk', {
-        operation,
-        leadIds: Array.from(selectedLeads),
-        data,
+      return apiMutation({
+        path: '/api/leads/bulk',
+        method: 'POST',
+        body: {
+          operation,
+          leadIds: Array.from(selectedLeads),
+          data,
+        },
       });
-      return res.json();
     },
     onSuccess: () => {
       toast({
@@ -99,9 +111,10 @@ export default function Leads() {
 
   const handleExport = async () => {
     try {
+      const token = await getCurrentIdToken();
       const response = await fetch('/api/leads/export', {
         headers: {
-          'Authorization': `Bearer ${await (await import('@/lib/firebase')).auth.currentUser?.getIdToken()}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
       const blob = await response.blob();
@@ -272,7 +285,7 @@ export default function Leads() {
           title="No leads yet"
           description="Import your first leads from CSV or connect to a data source to get started"
           actionLabel="Import Leads"
-          onAction={() => {}}
+          onAction={() => setShowImportDialog(true)}
         />
       ) : (
         <div className="border border-border rounded-lg">

@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
 import { SiGmail } from "react-icons/si";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiMutation, apiQuery } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
 
@@ -16,18 +16,16 @@ export function GmailIntegration() {
   const { toast } = useToast();
 
   const { data: status, isLoading } = useQuery<GmailStatus>({
-    queryKey: ['/api/oauth/google/status'],
+    queryKey: ["/api/oauth/google/status"],
   });
 
-  const connectMutation = useMutation({
+  const connectMutation = useMutation<{ authUrl: string }, Error>({
     mutationFn: async () => {
-      const response = await apiRequest('/api/oauth/google/start', {
-        method: 'GET',
-      });
-      return response;
+      const data = (await apiQuery("/api/oauth/google/start")) as { authUrl: string };
+      return data;
     },
-    onSuccess: (data: { authUrl: string }) => {
-      window.open(data.authUrl, '_blank', 'width=600,height=700');
+    onSuccess: (data) => {
+      window.open(data.authUrl, "_blank", "width=600,height=700");
       
       toast({
         title: "Opening Google OAuth",
@@ -36,12 +34,12 @@ export function GmailIntegration() {
 
       const checkInterval = setInterval(async () => {
         const updatedStatus = await queryClient.fetchQuery<GmailStatus>({
-          queryKey: ['/api/oauth/google/status'],
+          queryKey: ["/api/oauth/google/status"],
         });
 
-        if (updatedStatus.connected) {
+        if (updatedStatus?.connected) {
           clearInterval(checkInterval);
-          queryClient.invalidateQueries({ queryKey: ['/api/oauth/google/status'] });
+          queryClient.invalidateQueries({ queryKey: ["/api/oauth/google/status"] });
           toast({
             title: "Gmail Connected",
             description: `Successfully connected ${updatedStatus.email}`,
@@ -60,14 +58,14 @@ export function GmailIntegration() {
     },
   });
 
-  const disconnectMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest('/api/oauth/google/disconnect', {
-        method: 'DELETE',
-      });
-    },
+  const disconnectMutation = useMutation<unknown, Error>({
+    mutationFn: async () =>
+      apiMutation({
+        path: "/api/oauth/google/disconnect",
+        method: "DELETE",
+      }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/oauth/google/status'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/oauth/google/status"] });
       toast({
         title: "Gmail Disconnected",
         description: "Your Gmail account has been disconnected",

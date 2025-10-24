@@ -239,7 +239,12 @@ export default function Onboarding() {
                   </Button>
                 </div>
                 <div className="text-center">
-                  <Button variant="link" size="sm" data-testid="button-download-template">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-primary underline-offset-4 hover:underline"
+                    data-testid="button-download-template"
+                  >
                     Download CSV Template
                   </Button>
                 </div>

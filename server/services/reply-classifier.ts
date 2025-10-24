@@ -249,7 +249,7 @@ export async function processClassifiedReply(params: {
   await leadRef.update(updates);
 
   // Record analytics event for reply
-  const { recordEvent } = await import('../lib/events');
+  const { recordEvent } = await import('../lib/events.js');
   await recordEvent({
     tenantId,
     leadId,

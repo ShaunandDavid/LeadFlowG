@@ -114,13 +114,29 @@ export function AppSidebar() {
           <SidebarGroupLabel>Quick Actions</SidebarGroupLabel>
           <SidebarGroupContent>
             <div className="space-y-2 px-2">
-              <Button variant="outline" size="sm" className="w-full justify-start" data-testid="button-new-sequence">
-                <Plus className="h-4 w-4 mr-2" />
-                New Sequence
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start"
+                data-testid="button-new-sequence"
+                asChild
+              >
+                <Link href="/sequences">
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Sequence
+                </Link>
               </Button>
-              <Button variant="outline" size="sm" className="w-full justify-start" data-testid="button-import-leads">
-                <Plus className="h-4 w-4 mr-2" />
-                Import Leads
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start"
+                data-testid="button-import-leads"
+                asChild
+              >
+                <Link href="/leads">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Import Leads
+                </Link>
               </Button>
             </div>
           </SidebarGroupContent>

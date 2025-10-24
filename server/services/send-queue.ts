@@ -10,6 +10,7 @@ export interface QueuedEmail {
   sequenceId: string;
   stepId: string;
   templateId: string;
+  runId: string;
   scheduledFor: string; // ISO timestamp
   idempotencyKey: string; // Prevents duplicate sends
   status: 'pending' | 'processing' | 'sent' | 'failed';
@@ -68,11 +69,12 @@ export async function enqueueEmail(params: {
   templateId: string;
   scheduledFor: Date;
   idempotencyKey?: string;
+  runId: string;
 }): Promise<QueuedEmail> {
-  const { tenantId, leadId, sequenceId, stepId, templateId, scheduledFor, idempotencyKey } = params;
+  const { tenantId, leadId, sequenceId, stepId, templateId, scheduledFor, idempotencyKey, runId } = params;
   
   // Generate deterministic idempotency key (NO timestamp to ensure deduplication)
-  const key = idempotencyKey || `${leadId}_${sequenceId}_${stepId}`;
+  const key = idempotencyKey || `${runId}_${leadId}_${sequenceId}_${stepId}`;
   
   // Use idempotency key as document ID to enforce uniqueness atomically
   // Hash it to ensure valid Firestore document ID (no colons, slashes, etc.)
@@ -91,6 +93,7 @@ export async function enqueueEmail(params: {
     sequenceId,
     stepId,
     templateId,
+    runId,
     scheduledFor: scheduledFor.toISOString(),
     idempotencyKey: key,
     status: 'pending',
@@ -112,7 +115,27 @@ export async function enqueueEmail(params: {
     if (error.code === 6 || error.message?.includes('ALREADY_EXISTS')) {
       // Return existing document
       const doc = await queueRef.get();
-      return { id: docId, ...doc.data() } as QueuedEmail;
+      const existingData = (doc.data() ?? {}) as Partial<QueuedEmail>;
+      if (!existingData.runId && runId) {
+        await queueRef.update({ runId });
+        existingData.runId = runId;
+      }
+      return {
+        id: docId,
+        tenantId: existingData.tenantId ?? tenantId,
+        leadId: existingData.leadId ?? leadId,
+        sequenceId: existingData.sequenceId ?? sequenceId,
+        stepId: existingData.stepId ?? stepId,
+        templateId: existingData.templateId ?? templateId,
+        runId: existingData.runId ?? runId,
+        scheduledFor: existingData.scheduledFor ?? scheduledFor.toISOString(),
+        idempotencyKey: existingData.idempotencyKey ?? key,
+        status: existingData.status ?? 'pending',
+        attemptCount: existingData.attemptCount ?? 0,
+        lastAttempt: existingData.lastAttempt,
+        error: existingData.error,
+        createdAt: existingData.createdAt ?? now,
+      };
     }
     // Other error, re-throw
     throw error;
@@ -140,10 +163,19 @@ export async function getNextBatch(tenantId: string, batchSize: number = 10): Pr
     .limit(actualBatchSize)
     .get();
   
-  return snapshot.docs.map(doc => ({
-    id: doc.id,
-    ...doc.data(),
-  })) as QueuedEmail[];
+  return snapshot.docs
+    .map(doc => {
+      const data = doc.data() as Partial<QueuedEmail>;
+      if (!data?.runId) {
+        console.warn('Queued email missing runId; skipping', { tenantId, emailId: doc.id });
+        return null;
+      }
+      return {
+        id: doc.id,
+        ...data,
+      } as QueuedEmail;
+    })
+    .filter((value): value is QueuedEmail => value !== null);
 }
 
 export async function markAsProcessing(tenantId: string, emailId: string): Promise<boolean> {

@@ -126,7 +126,7 @@ async function processBounce(params: {
   }
 
   // Record analytics event for bounce
-  const { recordEvent } = await import('../lib/events');
+  const { recordEvent } = await import('../lib/events.js');
   await recordEvent({
     tenantId,
     type: 'bounce',
@@ -159,10 +159,11 @@ async function processBounce(params: {
 export async function checkForBounces(tenantId: string): Promise<{ processed: number }> {
   try {
     // Get Gmail client
-    const gmail = await getGmailClient(tenantId);
-    if (!gmail) {
+    const gmailClient = await getGmailClient(tenantId);
+    if (!gmailClient) {
       return { processed: 0 };
     }
+    const { gmail } = gmailClient;
 
     // Search for bounce messages in the last 24 hours
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);

@@ -24,7 +24,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { Download, Plus, Trash2, Search } from 'lucide-react';
-import { queryClient, apiRequest } from '@/lib/queryClient';
+import { queryClient, apiMutation } from '@/lib/queryClient';
 
 interface SuppressionEntry {
   email: string;
@@ -50,13 +50,14 @@ export default function SuppressionListPage() {
 
   const addMutation = useMutation({
     mutationFn: async (emails: string[]) => {
-      return apiRequest('/api/suppressions/bulk', {
+      return apiMutation({
+        path: '/api/suppressions/bulk',
         method: 'POST',
-        body: JSON.stringify({
+        body: {
           emails,
           reason: 'manual',
           source: 'admin-ui',
-        }),
+        },
       });
     },
     onSuccess: () => {
@@ -79,7 +80,8 @@ export default function SuppressionListPage() {
 
   const removeMutation = useMutation({
     mutationFn: async (email: string) => {
-      return apiRequest(`/api/suppressions/${encodeURIComponent(email)}`, {
+      return apiMutation({
+        path: `/api/suppressions/${encodeURIComponent(email)}`,
         method: 'DELETE',
       });
     },

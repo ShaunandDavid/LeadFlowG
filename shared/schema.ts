@@ -170,16 +170,19 @@ export const runSchema = z.object({
   tenantId: z.string(),
   sequenceId: z.string(),
   listId: z.string(),
-  state: z.enum(["pending", "running", "paused", "done"]).default("pending"),
+  status: z.enum(["pending", "active", "paused", "completed", "cancelled"]).default("pending"),
   stats: z.object({
     totalLeads: z.number().default(0),
     contacted: z.number().default(0),
     replied: z.number().default(0),
     booked: z.number().default(0),
+    unsubscribed: z.number().default(0),
   }).optional(),
   startedAt: z.string().optional(),
   completedAt: z.string().optional(),
+  lastStepId: z.string().optional(),
   createdAt: z.string(),
+  updatedAt: z.string().optional(),
 });
 
 export const insertRunSchema = runSchema.omit({ id: true, createdAt: true });

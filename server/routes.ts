@@ -1,6 +1,9 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { adminAuth, adminDb } from "./lib/firebase-admin";
+import { verifyTrackingToken } from "./lib/track";
+import { recordEvent, getTenantAnalytics, getSequenceAnalytics, getAnalyticsEvents } from "./lib/events";
+import type { AnalyticsEvent } from "./lib/events";
 import { authenticateToken, requireRole, AuthRequest } from "./middleware/auth";
 import { scoreLead, classifyReply, isOpenAIAvailable } from "./services/openai";
 import { stripe, createCheckoutSession, createBillingPortalSession, isStripeAvailable, PLAN_CONFIGS } from "./services/stripe";
@@ -190,7 +193,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...doc.data(),
       }));
 
-      res.json(leads);
+      const searchTerm = typeof search === "string" ? search.trim().toLowerCase() : "";
+      const filteredLeads = searchTerm
+        ? leads.filter((lead: any) => {
+            const name = `${lead.person?.firstName ?? ""} ${lead.person?.lastName ?? ""}`.toLowerCase();
+            const email = (lead.contact?.email ?? "").toLowerCase();
+            const company = (lead.company?.name ?? "").toLowerCase();
+            const title = (lead.person?.title ?? "").toLowerCase();
+
+            return (
+              name.includes(searchTerm) ||
+              email.includes(searchTerm) ||
+              company.includes(searchTerm) ||
+              title.includes(searchTerm)
+            );
+          })
+        : leads;
+
+      res.json(filteredLeads);
     } catch (error) {
       console.error("Fetch leads error:", error);
       res.status(500).json({ error: "Failed to fetch leads" });
@@ -1151,9 +1171,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.send(pixel);
       }
 
-      const { verifyTrackingToken } = await import('../lib/track');
-      const { recordEvent } = await import('../lib/events');
-      
       // Verify token
       const payload = verifyTrackingToken(id);
       
@@ -1201,9 +1218,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).send('Invalid tracking link');
       }
 
-      const { verifyTrackingToken } = await import('../lib/track');
-      const { recordEvent } = await import('../lib/events');
-      
       // Verify token
       const payload = verifyTrackingToken(id);
       
@@ -1248,7 +1262,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Start date and end date required" });
       }
 
-      const { getTenantAnalytics } = await import('../lib/events');
       const analytics = await getTenantAnalytics({
         tenantId,
         startDate: startDate as string,
@@ -1277,7 +1290,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Start date and end date required" });
       }
 
-      const { getSequenceAnalytics } = await import('../lib/events');
       const analytics = await getSequenceAnalytics({
         sequenceId,
         startDate: startDate as string,
@@ -1304,7 +1316,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Start date and end date required" });
       }
 
-      const { getAnalyticsEvents } = await import('../lib/events');
       const events = await getAnalyticsEvents({
         tenantId,
         startDate: startDate as string,
@@ -1313,20 +1324,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Convert to CSV
-      const headers = ['Timestamp', 'Type', 'Sequence', 'Step', 'Lead', 'Message ID', 'URL', 'User Agent'];
-      const rows = events.map(e => [
-        e.timestamp,
-        e.type,
-        e.sequenceId || '',
-        e.stepId || '',
-        e.leadId || '',
-        e.messageId || '',
-        e.url || '',
-        e.userAgent || '',
-      ]);
+      const headers: string[] = ['Timestamp', 'Type', 'Sequence', 'Step', 'Lead', 'Message ID', 'URL', 'User Agent'];
+      const rows: string[][] = events.map((event) => {
+        const analyticsEvent = event as AnalyticsEvent;
+        return [
+          analyticsEvent.timestamp,
+          analyticsEvent.type,
+          analyticsEvent.sequenceId ?? '',
+          analyticsEvent.stepId ?? '',
+          analyticsEvent.leadId ?? '',
+          analyticsEvent.messageId ?? '',
+          analyticsEvent.url ?? '',
+          analyticsEvent.userAgent ?? '',
+        ];
+      });
 
       const csv = [headers, ...rows]
-        .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+        .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
         .join('\n');
 
       res.setHeader('Content-Type', 'text/csv');

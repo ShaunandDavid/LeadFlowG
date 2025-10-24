@@ -47,7 +47,7 @@ export default function BookingPage() {
 
   // Fetch booking config
   const { data: config, isLoading: configLoading } = useQuery<BookingConfig>({
-    queryKey: [`/api/booking/${tenantId}/config`],
+    queryKey: tenantId ? [`/api/booking/${tenantId}/config`] : ['/api/booking/config'],
     enabled: !!tenantId,
   });
 
@@ -55,9 +55,16 @@ export default function BookingPage() {
   const startDate = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
   const endDate = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
   
+  const slotParams =
+    selectedMeetingType && selectedDate
+      ? { startDate, endDate, meetingTypeId: selectedMeetingType }
+      : undefined;
+
   const { data: slots = [], isLoading: slotsLoading } = useQuery<AvailableSlot[]>({
-    queryKey: [`/api/booking/${tenantId}/slots`, { startDate, endDate, meetingTypeId: selectedMeetingType }],
-    enabled: !!tenantId && !!selectedMeetingType && !!selectedDate,
+    queryKey: tenantId
+      ? [`/api/booking/${tenantId}/slots`, slotParams ?? {}]
+      : ['/api/booking/slots'],
+    enabled: !!tenantId && !!slotParams,
   });
 
   // Create booking mutation

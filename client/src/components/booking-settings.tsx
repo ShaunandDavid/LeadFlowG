@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { queryClient, apiRequest } from '@/lib/queryClient';
+import { queryClient, apiMutation } from '@/lib/queryClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -106,8 +106,12 @@ export function BookingSettings() {
   }, [config]);
 
   const updateMutation = useMutation({
-    mutationFn: (data: BookingConfig) => 
-      apiRequest('/api/booking/config', 'PUT', data),
+    mutationFn: (data: BookingConfig) =>
+      apiMutation({
+        path: '/api/booking/config',
+        method: 'PUT',
+        body: data,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/booking/config'] });
       toast({

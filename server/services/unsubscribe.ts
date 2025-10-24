@@ -39,7 +39,7 @@ export async function verifyUnsubscribeToken(token: string): Promise<{
     const [tenantId, leadId, providedHash] = parts;
     
     // Verify the token by getting the lead email and recomputing the hash
-    const { adminDb } = await import('../lib/firebase-admin');
+    const { adminDb } = await import('../lib/firebase-admin.js');
     const leadDoc = await adminDb
       .collection("tenants")
       .doc(tenantId)
@@ -120,7 +120,7 @@ export async function processUnsubscribe(params: {
   });
 
   // Record analytics event for unsubscribe
-  const { recordEvent } = await import('../lib/events');
+  const { recordEvent } = await import('../lib/events.js');
   await recordEvent({
     tenantId,
     leadId,

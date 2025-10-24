@@ -5,9 +5,11 @@ import { Mail, TrendingUp, MessageSquare, Calendar, AlertTriangle, CheckCircle }
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 
 export default function Dashboard() {
   // Fetch dashboard metrics
+  const [, setLocation] = useLocation();
   const { data: metrics, isLoading } = useQuery<{
     emailsSent: number;
     openRate: number;
@@ -48,9 +50,9 @@ export default function Dashboard() {
       {showBounceWarning && (
         <GuardrailBanner
           type="error"
-          message={`Bounce rate at ${metrics?.bounceRate.toFixed(1)}% — sending paused to protect deliverability. Run email verification on your list.`}
+          message={`Bounce rate at ${metrics?.bounceRate.toFixed(1)}% - sending paused to protect deliverability. Run email verification on your list.`}
           actionLabel="Clean List"
-          onAction={() => {}}
+          onAction={() => setLocation("/suppressions")}
           dismissible
         />
       )}
@@ -60,7 +62,7 @@ export default function Dashboard() {
           type="warning"
           message={`Daily sending capacity at ${Math.round((metrics?.dailyUsage || 0) / (metrics?.dailyCapacity || 1) * 100)}%. Upgrade your plan for higher limits.`}
           actionLabel="View Plans"
-          onAction={() => {}}
+          onAction={() => setLocation("/settings")}
           dismissible
         />
       )}

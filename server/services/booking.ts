@@ -303,7 +303,7 @@ export async function createBooking(params: {
     });
 
   // Record analytics event for booking
-  const { recordEvent } = await import('../lib/events');
+  const { recordEvent } = await import('../lib/events.js');
   await recordEvent({
     tenantId,
     leadId,
@@ -367,8 +367,55 @@ function getDayOfWeek(date: Date): keyof WeeklyAvailability {
 }
 
 function parseTimeSlot(date: Date, time: string, timezone: string): Date {
+  return zonedTimeToUtc(date, time, timezone);
+}
+
+function zonedTimeToUtc(date: Date, time: string, timeZone: string): Date {
   const [hours, minutes] = time.split(':').map(Number);
-  const result = new Date(date);
-  result.setHours(hours, minutes, 0, 0);
-  return result;
+  const hour = Number.isFinite(hours) ? hours : 0;
+  const minute = Number.isFinite(minutes) ? minutes : 0;
+  const baseUtc = new Date(
+    Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth(),
+      date.getUTCDate(),
+      hour,
+      minute,
+      0,
+      0,
+    ),
+  );
+
+  const offset = getTimeZoneOffset(baseUtc, timeZone);
+  return new Date(baseUtc.getTime() - offset);
+}
+
+function getTimeZoneOffset(date: Date, timeZone: string): number {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    hourCycle: 'h23',
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+
+  const parts = dtf.formatToParts(date);
+  const filled: Record<string, string> = {};
+  for (const { type, value } of parts) {
+    filled[type] = value;
+  }
+
+  const asUTC = Date.UTC(
+    Number(filled.year),
+    Number(filled.month) - 1,
+    Number(filled.day),
+    Number(filled.hour),
+    Number(filled.minute),
+    Number(filled.second),
+  );
+
+  return asUTC - date.getTime();
 }

@@ -12,6 +12,7 @@ interface QueuedEmail {
   sequenceId: string;
   stepId: string;
   templateId: string;
+  runId: string;
   scheduledFor: string;
   status: 'pending' | 'processing' | 'sent' | 'failed';
   idempotencyKey: string;
@@ -24,7 +25,7 @@ interface QueuedEmail {
  * Process a single email from the queue
  */
 async function processSingleEmail(email: QueuedEmail): Promise<void> {
-  const { tenantId, leadId, templateId, id: emailId } = email;
+  const { tenantId, leadId, templateId, id: emailId, runId } = email;
 
   try {
     // Check if Gmail is connected
@@ -96,7 +97,7 @@ async function processSingleEmail(email: QueuedEmail): Promise<void> {
     const messageId = `${tenantId}-${leadId}-${Date.now()}`;
 
     // Inject click tracking
-    const { mintTrackingToken } = await import('../lib/track');
+    const { mintTrackingToken } = await import('../lib/track.js');
     htmlBody = htmlBody.replace(
       /href="(https?:\/\/[^"]+)"/gi,
       (match, url) => {
@@ -155,7 +156,7 @@ async function processSingleEmail(email: QueuedEmail): Promise<void> {
     console.log(`Email sent successfully: ${result.messageId} to ${lead.contact.email}`);
 
     // Record send event in analytics
-    const { recordEvent } = await import('../lib/events');
+    const { recordEvent } = await import('../lib/events.js');
     await recordEvent({
       tenantId,
       leadId,
@@ -181,8 +182,9 @@ async function processSingleEmail(email: QueuedEmail): Promise<void> {
     await markStepComplete({
       tenantId,
       leadId,
-      sequenceId: email.sequenceId,
+      runId,
       stepId: email.stepId,
+      sequenceId: email.sequenceId,
     });
 
   } catch (error) {

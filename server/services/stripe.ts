@@ -15,9 +15,7 @@ function getStripe(): Stripe {
       stripeAvailable = false;
       throw new Error('Stripe operations require STRIPE_SECRET_KEY environment variable');
     }
-    stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: "2023-10-16",
-    });
+    stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
     stripeAvailable = true;
   }
   return stripe;
@@ -105,15 +103,19 @@ export async function recordUsageEvent(params: {
   subscriptionItemId: string;
   quantity: number;
   action: 'increment' | 'set';
-}) {
+}): Promise<unknown> {
   try {
-    const usageRecord = await getStripe().subscriptionItems.createUsageRecord(
-      params.subscriptionItemId,
-      {
-        quantity: params.quantity,
-        action: params.action,
-      }
-    );
+    const stripeClient = getStripe();
+    const subscriptionItemsResource = stripeClient.subscriptionItems as unknown as {
+      createUsageRecord: (
+        id: string,
+        params: { quantity: number; action: 'increment' | 'set' },
+      ) => Promise<unknown>;
+    };
+    const usageRecord = await subscriptionItemsResource.createUsageRecord(params.subscriptionItemId, {
+      quantity: params.quantity,
+      action: params.action,
+    });
 
     return usageRecord;
   } catch (error) {

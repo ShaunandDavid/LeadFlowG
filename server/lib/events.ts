@@ -1,3 +1,4 @@
+import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from './firebase-admin';
 
 export type AnalyticsEventType =
@@ -108,7 +109,7 @@ async function updateRollups(event: AnalyticsEvent): Promise<void> {
   await tenantDailyRef.set(
     {
       date: dateKey,
-      [type]: adminDb.FieldValue.increment(1),
+      [type]: FieldValue.increment(1),
       updatedAt: new Date().toISOString(),
     },
     { merge: true }
@@ -127,7 +128,7 @@ async function updateRollups(event: AnalyticsEvent): Promise<void> {
         date: dateKey,
         sequenceId,
         tenantId,
-        [type]: adminDb.FieldValue.increment(1),
+        [type]: FieldValue.increment(1),
         updatedAt: new Date().toISOString(),
       },
       { merge: true }
@@ -147,7 +148,7 @@ async function updateRollups(event: AnalyticsEvent): Promise<void> {
         date: dateKey,
         templateId,
         tenantId,
-        [type]: adminDb.FieldValue.increment(1),
+        [type]: FieldValue.increment(1),
         updatedAt: new Date().toISOString(),
       },
       { merge: true }

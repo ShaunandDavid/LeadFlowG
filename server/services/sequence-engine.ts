@@ -293,6 +293,7 @@ export async function scheduleNextSteps(tenantId: string, runId: string): Promis
             stepId: step.id,
             templateId: step.templateId || '',
             scheduledFor: sendTime,
+            runId,
           });
           
           // Mark as enqueued for this step (prevents duplicate enqueues)
@@ -360,8 +361,10 @@ export async function markStepComplete(params: {
   tenantId: string;
   leadId: string;
   runId: string;
+  stepId: string;
+  sequenceId?: string;
 }): Promise<void> {
-  const { tenantId, leadId, runId } = params;
+  const { tenantId, leadId, runId, stepId, sequenceId } = params;
   
   const progressRef = adminDb
     .collection("tenants")
@@ -379,6 +382,7 @@ export async function markStepComplete(params: {
     currentStepIndex: progress.currentStepIndex + 1,
     enqueuedStepId: null,
     lastSentAt: new Date().toISOString(),
+    lastCompletedStepId: stepId,
     nextScheduledAt: null,
     updatedAt: new Date().toISOString(),
   });
@@ -389,6 +393,9 @@ export async function markStepComplete(params: {
   
   await runRef.update({
     'stats.contacted': FieldValue.increment(1),
+    lastStepId: stepId,
+    updatedAt: new Date().toISOString(),
+    ...(sequenceId ? { sequenceId } : {}),
   });
   
   // Immediately schedule next steps for this lead
