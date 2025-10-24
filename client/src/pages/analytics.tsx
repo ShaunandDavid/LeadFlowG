@@ -178,6 +178,9 @@ export default function Analytics() {
                 <p className="text-xs text-muted-foreground">
                   {totals.opens.toLocaleString()} opens
                 </p>
+                <p className="text-xs text-muted-foreground mt-1 opacity-70">
+                  Note: Opens may be inflated by Apple Mail Privacy Protection
+                </p>
               </CardContent>
             </Card>
 
