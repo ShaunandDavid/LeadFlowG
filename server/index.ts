@@ -87,5 +87,10 @@ app.use((req, res, next) => {
     const { startGmailMonitor } = await import('./services/gmail-monitor');
     startGmailMonitor(60000);
     log('Gmail monitor started');
+    
+    // Start bounce detector (checks every 5 minutes)
+    const { startBounceDetector } = await import('./services/bounce-detector');
+    startBounceDetector(300000);
+    log('Bounce detector started');
   });
 })();

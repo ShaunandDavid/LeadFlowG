@@ -50,6 +50,20 @@ async function processSingleEmail(email: QueuedEmail): Promise<void> {
       throw new Error('Lead has no email address');
     }
 
+    // Check if email is suppressed
+    const { isEmailSuppressed } = await import('./suppression');
+    const suppressionCheck = await isEmailSuppressed(tenantId, lead.contact.email);
+    
+    if (suppressionCheck.suppressed) {
+      console.log(`Email ${lead.contact.email} is suppressed (${suppressionCheck.reason}), skipping send`);
+      await markAsFailed(
+        tenantId,
+        emailId,
+        `Email suppressed: ${suppressionCheck.reason}`
+      );
+      return;
+    }
+
     // Get template
     const templateDoc = await adminDb
       .collection('tenants')

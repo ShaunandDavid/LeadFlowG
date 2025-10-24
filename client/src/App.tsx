@@ -18,6 +18,7 @@ import Analytics from "@/pages/analytics";
 import Settings from "@/pages/settings";
 import Onboarding from "@/pages/onboarding";
 import BookingPage from "@/pages/booking";
+import SuppressionListPage from "@/pages/suppression-list";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: () => JSX.Element }) {
@@ -114,6 +115,17 @@ function Router() {
             component={() => (
               <AppLayout>
                 <Settings />
+              </AppLayout>
+            )}
+          />
+        )}
+      </Route>
+      <Route path="/suppressions">
+        {() => (
+          <ProtectedRoute
+            component={() => (
+              <AppLayout>
+                <SuppressionListPage />
               </AppLayout>
             )}
           />

@@ -1,4 +1,4 @@
-import { Home, Users, Send, BarChart3, Settings, Plus, Building2 } from "lucide-react";
+import { Home, Users, Send, BarChart3, Settings, Plus, Building2, Shield } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -31,6 +31,10 @@ const mainNavItems = [
   { title: "Sequences", url: "/sequences", icon: Send },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Settings", url: "/settings", icon: Settings },
+];
+
+const complianceNavItems = [
+  { title: "Suppression List", url: "/suppressions", icon: Shield },
 ];
 
 export function AppSidebar() {
@@ -73,6 +77,27 @@ export function AppSidebar() {
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton asChild isActive={isActive} data-testid={`link-sidebar-${item.title.toLowerCase()}`}>
+                      <Link href={item.url}>
+                        <item.icon className="h-4 w-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Compliance</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {complianceNavItems.map((item) => {
+                const isActive = location === item.url || location.startsWith(item.url + "/");
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive} data-testid={`link-sidebar-${item.title.toLowerCase().replace(' ', '-')}`}>
                       <Link href={item.url}>
                         <item.icon className="h-4 w-4" />
                         <span>{item.title}</span>

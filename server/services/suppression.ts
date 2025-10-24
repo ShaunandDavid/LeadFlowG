@@ -187,3 +187,18 @@ export async function bulkSuppressEmails(params: {
   
   return { suppressed: count };
 }
+
+/**
+ * Alias for bulkSuppressEmails (used by reply classifier)
+ */
+export async function addToSuppression(params: {
+  tenantId: string;
+  emails: string[];
+  reason: string;
+  source?: string;
+}): Promise<void> {
+  await bulkSuppressEmails({
+    ...params,
+    reason: params.reason as any,
+  });
+}
