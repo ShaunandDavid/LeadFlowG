@@ -876,7 +876,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/queue/advance-warmup", authenticateToken, requireRole('admin'), async (req: AuthRequest, res) => {
+  app.post("/api/queue/advance-warmup", authenticateToken, requireRole(['admin']), async (req: AuthRequest, res) => {
     try {
       const tenantId = req.user?.tenantId;
       if (!tenantId) {
@@ -1043,6 +1043,206 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Create portal error:", error);
       res.status(500).json({ error: "Failed to create portal session" });
+    }
+  });
+
+  // ==================== SUPPRESSION ROUTES ====================
+
+  app.get("/api/suppressions", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { getSuppressionList } = await import('./services/suppression');
+      const { limit, startAfter } = req.query;
+      
+      const suppressions = await getSuppressionList({
+        tenantId,
+        limit: limit ? parseInt(limit as string) : undefined,
+        startAfter: startAfter as string,
+      });
+
+      res.json(suppressions);
+    } catch (error) {
+      console.error("Get suppressions error:", error);
+      res.status(500).json({ error: "Failed to get suppression list" });
+    }
+  });
+
+  app.post("/api/suppressions", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { suppressEmail } = await import('./services/suppression');
+      const { email, reason, source } = req.body;
+
+      if (!email || !reason) {
+        return res.status(400).json({ error: "Email and reason required" });
+      }
+
+      await suppressEmail({ tenantId, email, reason, source });
+      res.status(201).json({ success: true });
+    } catch (error) {
+      console.error("Suppress email error:", error);
+      res.status(500).json({ error: "Failed to suppress email" });
+    }
+  });
+
+  app.post("/api/suppressions/bulk", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { bulkSuppressEmails } = await import('./services/suppression');
+      const { emails, reason, source } = req.body;
+
+      if (!Array.isArray(emails) || emails.length === 0 || !reason) {
+        return res.status(400).json({ error: "Emails array and reason required" });
+      }
+
+      const result = await bulkSuppressEmails({ tenantId, emails, reason, source });
+      res.json(result);
+    } catch (error) {
+      console.error("Bulk suppress error:", error);
+      res.status(500).json({ error: "Failed to bulk suppress emails" });
+    }
+  });
+
+  app.delete("/api/suppressions/:email", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { unsuppressEmail } = await import('./services/suppression');
+      const { email } = req.params;
+
+      await unsuppressEmail(tenantId, decodeURIComponent(email));
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Unsuppress email error:", error);
+      res.status(500).json({ error: "Failed to unsuppress email" });
+    }
+  });
+
+  // ==================== UNSUBSCRIBE ROUTES ====================
+
+  app.get("/api/unsubscribe", async (req, res) => {
+    try {
+      const { processUnsubscribe } = await import('./services/unsubscribe');
+      const { token } = req.query;
+
+      if (!token || typeof token !== 'string') {
+        return res.status(400).json({ error: "Unsubscribe token required" });
+      }
+
+      const result = await processUnsubscribe({
+        token,
+        userAgent: req.headers['user-agent'],
+        ipAddress: req.ip,
+      });
+
+      if (result.success) {
+        // Return HTML page for better UX
+        res.send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Unsubscribed Successfully</title>
+              <style>
+                body { font-family: system-ui; max-width: 600px; margin: 100px auto; text-align: center; }
+                h1 { color: #10b981; }
+              </style>
+            </head>
+            <body>
+              <h1>✓ Unsubscribed Successfully</h1>
+              <p>You have been removed from our mailing list.</p>
+              <p>Email: ${result.email}</p>
+            </body>
+          </html>
+        `);
+      } else {
+        res.status(400).send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Unsubscribe Failed</title>
+              <style>
+                body { font-family: system-ui; max-width: 600px; margin: 100px auto; text-align: center; }
+                h1 { color: #ef4444; }
+              </style>
+            </head>
+            <body>
+              <h1>✗ Unsubscribe Failed</h1>
+              <p>${result.error}</p>
+            </body>
+          </html>
+        `);
+      }
+    } catch (error) {
+      console.error("Unsubscribe error:", error);
+      res.status(500).send("Internal server error");
+    }
+  });
+
+  // ==================== BOUNCE/COMPLAINT WEBHOOKS ====================
+
+  app.post("/api/webhooks/bounce", async (req, res) => {
+    try {
+      const { processBounce } = await import('./services/bounce-handler');
+      const { tenantId, bounce } = req.body;
+
+      if (!tenantId || !bounce) {
+        return res.status(400).json({ error: "Tenant ID and bounce data required" });
+      }
+
+      await processBounce({ tenantId, bounce });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Process bounce error:", error);
+      res.status(500).json({ error: "Failed to process bounce" });
+    }
+  });
+
+  app.post("/api/webhooks/complaint", async (req, res) => {
+    try {
+      const { processComplaint } = await import('./services/bounce-handler');
+      const { tenantId, complaint } = req.body;
+
+      if (!tenantId || !complaint) {
+        return res.status(400).json({ error: "Tenant ID and complaint data required" });
+      }
+
+      await processComplaint({ tenantId, complaint });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Process complaint error:", error);
+      res.status(500).json({ error: "Failed to process complaint" });
+    }
+  });
+
+  app.get("/api/bounce-stats", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: "No tenant ID" });
+      }
+
+      const { getBounceStats } = await import('./services/bounce-handler');
+      const stats = await getBounceStats(tenantId);
+
+      res.json(stats);
+    } catch (error) {
+      console.error("Get bounce stats error:", error);
+      res.status(500).json({ error: "Failed to get bounce stats" });
     }
   });
 

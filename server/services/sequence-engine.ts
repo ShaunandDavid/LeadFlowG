@@ -241,6 +241,32 @@ export async function scheduleNextSteps(tenantId: string, runId: string): Promis
           break;
         }
         
+        // Check suppression list before enqueuing
+        const { isEmailSuppressed } = await import('./suppression');
+        const leadEmail = lead.contact?.email;
+        
+        if (!leadEmail) {
+          console.warn(`Lead ${progress.leadId} has no email, skipping sequence`);
+          // Mark as failed/bounced since no email
+          await progressDoc.ref.update({
+            status: 'bounced',
+            updatedAt: new Date().toISOString(),
+          });
+          break;
+        }
+        
+        const suppressionCheck = await isEmailSuppressed(tenantId, leadEmail);
+        if (suppressionCheck.suppressed) {
+          console.log(`Email ${leadEmail} is suppressed (${suppressionCheck.reason}), stopping sequence`);
+          // Mark progress as appropriate status based on suppression reason
+          const status = suppressionCheck.reason === 'unsubscribe' ? 'unsubscribed' : 'bounced';
+          await progressDoc.ref.update({
+            status,
+            updatedAt: new Date().toISOString(),
+          });
+          break;
+        }
+        
         // Calculate send time with quiet hours and send window
         const baseTime = progress.lastSentAt ? new Date(progress.lastSentAt) : now;
         const sendTime = calculateSendTime(

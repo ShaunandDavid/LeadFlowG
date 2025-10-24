@@ -1,0 +1,87 @@
+Core SaaS
+
+Multi-tenant Auth (Firebase) + custom claims; Firestore tenant-scoped schema.
+
+Leads: CSV import → normalize → dedupe (email/domain+name).
+
+Templates + simple sequence builder (vars + wait/branch).
+
+Rule-based scoring (A/B/C) + manual status.
+
+Deliverability & Safety
+
+Cloud Tasks queues; per-tenant/day caps; warm-up ramps.
+
+Verify emails (NeverBounce/ZeroBounce) before send.
+
+Bounce/complaint/reply webhooks → auto-pause at >3% bounce.
+
+Unsubscribe (global + list) + List-Unsubscribe header.
+
+Quiet hours / local send windows.
+
+Integrations & Keys
+
+Google OAuth (Gmail send + Calendar) via your platform app; store refresh tokens encrypted.
+
+Twilio managed sub-accounts (auto-provision + per-tenant numbers).
+
+Resend custom domains (SPF/DKIM/DMARC wizard) for Pro/Agency.
+
+Vendor keys via Secret Manager; all calls through server proxy.
+
+Outreach Engine
+
+Personalized email steps (token guard) + optional SMS steps.
+
+Reply classifier (positive/OOO/unsub/booked) → auto status changes.
+
+Throttled sending; idempotent message IDs; retries with backoff.
+
+Scheduling
+
+Native booking page /book/{tenant}/{rep} (Google Calendar sync, round-robin).
+
+Analytics
+
+Funnel: import → verified → A/B/C → contacted → replied → booked → won.
+
+Open/click/reply rates, subject/template leaderboard, send-time heatmap.
+
+Billing
+
+Stripe plans (Starter/Pro/Agency) + metered add-ons (emails/verification).
+
+Usage counters → nightly Stripe meter reports; hard/soft limit enforcement.
+
+Billing portal link in app.
+
+UI/UX
+
+Tenant dashboard (lead counts, sequence status, activity).
+
+Template library (roofing/dental/etc. packs).
+
+Settings: integrations, billing, branding (logo/colors), suppression list.
+
+Admin & Ops
+
+Admin console: impersonate, pause tenant, requeue DLQ, rate-limit knobs.
+
+Global suppression + domain/email blocks.
+
+Health checks + daily “risk report.”
+
+Observability & Data
+
+Sentry (errors), PostHog (product analytics), BigQuery event sink.
+
+Nightly Firestore backups; weekly coldline.
+
+Security & Compliance
+
+KMS/Secret Manager for tokens; server-side vendor proxy only.
+
+CASL/CTIA toggles (SMS), physical address in footer.
+
+Data export/delete (tenant-scoped).
