@@ -1267,12 +1267,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/oauth/google/start", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const tenantId = req.user?.tenantId;
-      if (!tenantId) {
-        return res.status(400).json({ error: "No tenant ID" });
+      const userId = req.user?.uid;
+      
+      if (!tenantId || !userId) {
+        return res.status(400).json({ error: "No tenant ID or user ID" });
       }
 
       const { getAuthUrl } = await import('./services/google-oauth');
-      const authUrl = getAuthUrl(tenantId);
+      const authUrl = await getAuthUrl(tenantId, userId);
 
       res.json({ authUrl });
     } catch (error) {

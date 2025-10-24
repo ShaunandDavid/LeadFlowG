@@ -48,27 +48,78 @@ export interface GoogleTokens {
   connectedAt: string;
 }
 
+interface OAuthState {
+  tenantId: string;
+  userId: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
 /**
  * Generate OAuth URL for user to authorize Gmail access
+ * SECURITY: Creates cryptographically random state token to prevent CSRF
  */
-export function getAuthUrl(tenantId: string): string {
+export async function getAuthUrl(tenantId: string, userId: string): Promise<string> {
+  // Generate cryptographically random state token
+  const stateToken = crypto.randomBytes(32).toString('hex');
+  
+  // Store state in Firestore with expiry (10 minutes)
+  const stateData: OAuthState = {
+    tenantId,
+    userId,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+  };
+
+  await adminDb
+    .collection('oauth_states')
+    .doc(stateToken)
+    .set(stateData);
+
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: SCOPES,
-    state: tenantId, // Pass tenantId in state to retrieve on callback
+    state: stateToken, // Use secure random token, not tenant ID
     prompt: 'consent', // Force consent screen to get refresh token
   });
+  
   return authUrl;
 }
 
 /**
  * Exchange authorization code for tokens and store them
+ * SECURITY: Validates state token before accepting OAuth callback
  */
 export async function handleOAuthCallback(params: {
   code: string;
-  state: string; // tenantId
-}): Promise<{ success: boolean; email: string }> {
-  const { code, state: tenantId } = params;
+  state: string; // Secure state token
+}): Promise<{ success: boolean; email: string; tenantId: string }> {
+  const { code, state: stateToken } = params;
+
+  // Verify and retrieve state from Firestore
+  const stateDoc = await adminDb
+    .collection('oauth_states')
+    .doc(stateToken)
+    .get();
+
+  if (!stateDoc.exists) {
+    throw new Error('Invalid or expired OAuth state token');
+  }
+
+  const stateData = stateDoc.data() as OAuthState;
+
+  // Check if state has expired
+  if (Date.now() > stateData.expiresAt) {
+    // Clean up expired state
+    await stateDoc.ref.delete();
+    throw new Error('OAuth state token has expired');
+  }
+
+  // Extract tenant ID and user ID from verified state
+  const { tenantId, userId } = stateData;
+
+  // Delete state token (one-time use)
+  await stateDoc.ref.delete();
 
   // Exchange code for tokens
   const { tokens } = await oauth2Client.getToken(code);
@@ -104,7 +155,7 @@ export async function handleOAuthCallback(params: {
     .doc('google')
     .set(tokenData);
 
-  return { success: true, email: data.email };
+  return { success: true, email: data.email, tenantId };
 }
 
 /**

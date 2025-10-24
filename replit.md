@@ -8,7 +8,7 @@ Production-grade white-label B2B outreach automation platform with multi-tenant 
 
 ## Recent Changes (Current Session - Autonomous Development)
 
-### Completed Tasks (1-5)
+### Completed Tasks (1-10)
 1. **Lead Import & Management** ✅
    - CSV import with deduplication by email and domain+name
    - Bulk operations: tag, export, delete, updateStatus, suppress
@@ -51,6 +51,35 @@ Production-grade white-label B2B outreach automation platform with multi-tenant 
    - processAllPendingSteps() cron endpoint for wait resumption
    - Fresh state reload each iteration (fixes stale snapshot issue)
    - Autonomous progression through wait→email→wait chains
+
+7. **Suppression List System** ✅
+   - Global and tenant-level suppression collections
+   - Bulk suppression operations (handles 10,000+ emails efficiently)
+   - Firestore batch management with fresh batch every 500 writes
+   - Integration into sequence engine (checks before enqueuing)
+
+8. **Unsubscribe System** ✅
+   - SHA-256 verified unsubscribe tokens (prevents forgery)
+   - Public unsubscribe page with success/error states
+   - Token generation recomputes hash from lead data
+   - Automatic lead progress updates and suppression
+
+9. **Bounce/Complaint Handling** ✅
+   - Webhook endpoints for bounce and complaint processing
+   - Intelligent suppression rules:
+     - Hard bounces → immediate suppression
+     - Soft bounces → suppress after 3 occurrences
+     - Complaints → immediate suppression
+   - Bounce stats tracking and reporting
+
+10. **Gmail OAuth Integration** ✅
+    - OAuth 2.0 flow with Gmail API scopes (gmail.send, calendar, userinfo.email)
+    - Encrypted token storage in Firestore (AES-256-CBC)
+    - Auto-refresh token management via googleapis library
+    - Email worker service processes queue every 60 seconds
+    - RFC822 email formatting with List-Unsubscribe headers
+    - Settings UI component for connection management
+    - Routes: /api/oauth/google/start, /callback, /status, /disconnect
 
 ## Recent Changes (Previous Session)
 
