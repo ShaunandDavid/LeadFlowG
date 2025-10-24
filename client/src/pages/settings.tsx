@@ -5,9 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { StatusBadge } from "@/components/status-badge";
-import { Settings as SettingsIcon, CreditCard, Palette, Users, Globe } from "lucide-react";
+import { Settings as SettingsIcon, CreditCard, Palette, Users, Globe, Calendar } from "lucide-react";
 import { SiStripe, SiTwilio } from "react-icons/si";
 import { GmailIntegration } from "@/components/gmail-integration";
+import { BookingSettings } from "@/components/booking-settings";
 
 export default function Settings() {
   return (
@@ -24,6 +25,10 @@ export default function Settings() {
           <TabsTrigger value="integrations" data-testid="tab-settings-integrations">
             <SettingsIcon className="h-4 w-4 mr-2" />
             Integrations
+          </TabsTrigger>
+          <TabsTrigger value="booking" data-testid="tab-settings-booking">
+            <Calendar className="h-4 w-4 mr-2" />
+            Booking
           </TabsTrigger>
           <TabsTrigger value="billing" data-testid="tab-settings-billing">
             <CreditCard className="h-4 w-4 mr-2" />
@@ -133,6 +138,10 @@ export default function Settings() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        <TabsContent value="booking" className="space-y-6">
+          <BookingSettings />
         </TabsContent>
 
         <TabsContent value="billing" className="space-y-6">
